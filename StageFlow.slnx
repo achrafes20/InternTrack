@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StageFlow.Api/StageFlow.Api.csproj" />
+    <Project Path="src/StageFlow.Application/StageFlow.Application.csproj" />
+    <Project Path="src/StageFlow.Domain/StageFlow.Domain.csproj" />
+    <Project Path="src/StageFlow.Infrastructure/StageFlow.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StageFlow.Api.IntegrationTests/StageFlow.Api.IntegrationTests.csproj" />
+    <Project Path="tests/StageFlow.Application.UnitTests/StageFlow.Application.UnitTests.csproj" />
+    <Project Path="tests/StageFlow.Domain.UnitTests/StageFlow.Domain.UnitTests.csproj" />
+  </Folder>
+</Solution>

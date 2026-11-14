@@ -1,0 +1,68 @@
+services:
+  stageflow-db:
+    image: postgres:16-alpine
+    container_name: stageflow-db
+    restart: always
+    environment:
+      POSTGRES_DB: stageflow_db
+      POSTGRES_USER: stageflow_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stageflow_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stageflow_user -d stageflow_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  stageflow-api:
+    build:
+      context: .
+      dockerfile: src/StageFlow.Api/Dockerfile
+    container_name: stageflow-api
+    restart: on-failure
+    environment:
+      # Démonstration locale : migrations et jeu de données activés.
+      # En production, utilisez ASPNETCORE_ENVIRONMENT=Production et fournissez les secrets
+      # via un gestionnaire de secrets (jamais de secret en clair dans le dépôt).
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=stageflow-db;Port=5432;Database=stageflow_db;Username=stageflow_user;Password=${POSTGRES_PASSWORD:-stageflow_password}
+      - JwtSettings__Secret=${JWT_SECRET:-StageFlow-Dev-Only-Secret-Key-Change-Me-In-Production-2026-ENSA-PFE!}
+      - JwtSettings__Issuer=StageFlowEnsa
+      - JwtSettings__Audience=StageFlowClient
+      - JwtSettings__AccessTokenExpirationMinutes=60
+      - JwtSettings__RefreshTokenExpirationDays=7
+      - Database__AutoMigrate=true
+      - Database__SeedDemoData=${SEED_DEMO_DATA:-true}
+      - AppConfig__FrontendBaseUrl=http://localhost:3000
+      - Cors__AllowedOrigins__0=http://localhost:3000
+      - Smtp__Enabled=false
+    ports:
+      - "5000:8080"
+    depends_on:
+      stageflow-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  stageflow-client:
+    build:
+      context: ./src/stageflow-client
+      dockerfile: Dockerfile
+    container_name: stageflow-client
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      stageflow-api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
