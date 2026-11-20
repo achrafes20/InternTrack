@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api, setAccessToken } from '../api/client';
+import { api, setAccessToken, refreshSession } from '../api/client';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -20,7 +20,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const { data } = await api.post('/auth/refresh');
+        const data = await refreshSession();
         setAccessToken(data.accessToken);
         setUser(data.user);
       } catch (err) {

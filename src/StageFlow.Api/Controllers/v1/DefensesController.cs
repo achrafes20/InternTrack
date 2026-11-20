@@ -47,9 +47,18 @@ public class DefensesController : ApiControllerBase
     [Authorize(Policy = "RequireDepartmentHeadRole")]
     public async Task<IActionResult> CheckConflict([FromBody] CheckConflictRequest request, CancellationToken cancellationToken)
     {
+        if (request.InternshipId.HasValue && !await _accessControl.CanManageInternshipAsync(request.InternshipId.Value, cancellationToken))
+            return Forbid();
+
         var result = await _defenseService.CheckConflictAsync(request, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>Enseignants pouvant siéger dans un jury ou encadrer un stage.</summary>
+    [HttpGet("/api/v1/teachers")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> GetTeachers(CancellationToken cancellationToken)
+        => Ok(await _defenseService.GetTeachersAsync(cancellationToken));
 
     [HttpPost]
     [Authorize(Policy = "RequireDepartmentHeadRole")]

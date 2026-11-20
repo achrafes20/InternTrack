@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using StageFlow.Application.Common.Interfaces;
 using StageFlow.Application.Features.Conventions.DTOs;
 using StageFlow.Domain.Common;
+using StageFlow.Domain.Entities;
+using StageFlow.Domain.Enums;
 
 namespace StageFlow.Application.Features.Conventions.Services;
 
@@ -10,6 +12,7 @@ public interface IConventionService
 {
     Task<Result<byte[]>> DownloadConventionPdfAsync(Guid internshipId, CancellationToken cancellationToken);
     Task<Result<ConventionVerificationDto>> VerifyConventionAsync(string verificationToken, CancellationToken cancellationToken);
+    Task<Result> SignAsync(Guid internshipId, ConventionParty party, CancellationToken cancellationToken);
 }
 
 public class ConventionService : IConventionService
@@ -36,7 +39,9 @@ public class ConventionService : IConventionService
 
     public async Task<Result<byte[]>> DownloadConventionPdfAsync(Guid internshipId, CancellationToken cancellationToken)
     {
+        // Lecture seule : la convention est créée lors de la validation du dossier, jamais lors d'un GET.
         var internship = await _context.Internships
+            .AsNoTracking()
             .Include(i => i.Company)
             .Include(i => i.AcademicTrack)
             .Include(i => i.Convention)
@@ -47,57 +52,66 @@ public class ConventionService : IConventionService
 
         var convention = internship.Convention;
         if (convention == null)
-        {
-            if (internship.Status < Domain.Enums.InternshipStatus.Valide)
-                return Result<byte[]>.Failure("Convention non disponible pour ce stage (le stage doit être validé ou en cours).");
+            return Result<byte[]>.Failure("Aucune convention n'a encore été générée : le dossier doit d'abord être validé par le responsable de filière.");
 
-            var convNumber = $"CONV-ENSA-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
-            convention = new Domain.Entities.Convention(internship.Id, convNumber);
-            convention.SignByStudent();
-            convention.SignByCompany();
-            convention.SignBySchool();
-            await _context.Conventions.AddAsync(convention, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
-        // Informations réelles de l'élève ingénieur propriétaire du stage.
         var student = await _identityService.GetUserByIdAsync(internship.StudentId, cancellationToken);
-        var studentFullName = student.IsSuccess
-            ? student.Value!.FullName
-            : "Élève Ingénieur ENSA";
-        var studentEmail = student.IsSuccess
-            ? student.Value!.Email
-            : internship.CompanySupervisorEmail;
+        var studentFullName = student.IsSuccess ? student.Value!.FullName : "Élève Ingénieur ENSA";
+        var studentEmail = student.IsSuccess ? student.Value!.Email : "—";
         var studentNumber = student.IsSuccess && !string.IsNullOrWhiteSpace(student.Value!.StudentNumber)
             ? student.Value!.StudentNumber!
-            : internship.StudentId[..Math.Min(8, internship.StudentId.Length)];
+            : "—";
 
-        // URL publique de vérification, configurable par environnement.
-        var frontendBaseUrl = _configuration["AppConfig:FrontendBaseUrl"] ?? "http://localhost:5173";
-        var verificationUrl = $"{frontendBaseUrl.TrimEnd('/')}/verify-convention/{convention.VerificationToken}";
-
+        var verificationUrl = BuildVerificationUrl(convention.VerificationToken);
         var qrCodeBytes = _qrCodeService.GenerateQrCodePng(verificationUrl);
 
-        var pdfBytes = _pdfGenerator.GenerateConventionPdf(
-            conventionNumber: convention.ConventionNumber,
-            studentFullName: studentFullName,
-            studentEmail: studentEmail,
-            studentNumber: studentNumber,
-            trackName: internship.AcademicTrack.Name,
-            companyName: internship.Company.Name,
-            companyAddress: internship.Company.Address,
-            supervisorName: internship.CompanySupervisorName,
-            internshipTitle: internship.Title,
-            subjectDescription: internship.SubjectDescription,
-            startDate: internship.Period.StartDate,
-            endDate: internship.Period.EndDate,
-            qrCodeBytes: qrCodeBytes);
+        var pdfBytes = _pdfGenerator.GenerateConventionPdf(new ConventionPdfModel(
+            convention.ConventionNumber,
+            studentFullName,
+            studentEmail,
+            studentNumber,
+            internship.AcademicTrack.Name,
+            internship.Company.Name,
+            internship.Company.Address,
+            internship.CompanySupervisorName,
+            internship.Title,
+            internship.SubjectDescription,
+            internship.Period.StartDate,
+            internship.Period.EndDate,
+            convention.IsSignedByStudent,
+            convention.IsSignedByCompany,
+            convention.IsSignedBySchool,
+            convention.SignedAt,
+            verificationUrl,
+            qrCodeBytes));
 
         return Result<byte[]>.Success(pdfBytes);
     }
 
+    public async Task<Result> SignAsync(Guid internshipId, ConventionParty party, CancellationToken cancellationToken)
+    {
+        var convention = await _context.Conventions
+            .Include(c => c.Internship)
+            .FirstOrDefaultAsync(c => c.InternshipId == internshipId, cancellationToken);
+
+        if (convention == null)
+            return Result.Failure("Aucune convention n'existe pour ce stage.");
+
+        if (convention.Internship.Status is InternshipStatus.Brouillon or InternshipStatus.Propose or InternshipStatus.Refuse)
+            return Result.Failure("La convention ne peut être signée que pour un dossier validé.");
+
+        var result = convention.Sign(party);
+        if (result.IsFailure)
+            return result;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
     public async Task<Result<ConventionVerificationDto>> VerifyConventionAsync(string verificationToken, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(verificationToken) || verificationToken.Length > 64)
+            return Result<ConventionVerificationDto>.Failure("Jeton de vérification introuvable. Ce document n'est pas authentique.");
+
         var convention = await _context.Conventions
             .Include(c => c.Internship)
                 .ThenInclude(i => i.Company)
@@ -110,9 +124,7 @@ public class ConventionService : IConventionService
             return Result<ConventionVerificationDto>.Failure("Jeton de vérification introuvable. Ce document n'est pas authentique.");
 
         var student = await _identityService.GetUserByIdAsync(convention.Internship.StudentId, cancellationToken);
-        var studentFullName = student.IsSuccess
-            ? student.Value!.FullName
-            : "Élève Ingénieur ENSA";
+        var studentFullName = student.IsSuccess ? student.Value!.FullName : "Élève Ingénieur ENSA";
 
         var dto = new ConventionVerificationDto(
             convention.ConventionNumber,
@@ -122,9 +134,18 @@ public class ConventionService : IConventionService
             convention.Internship.Period.StartDate,
             convention.Internship.Period.EndDate,
             IsAuthentic: true,
-            IsFullySigned: convention.SignedAt.HasValue,
+            convention.IsSignedByStudent,
+            convention.IsSignedByCompany,
+            convention.IsSignedBySchool,
+            convention.IsFullySigned,
             convention.SignedAt);
 
         return Result<ConventionVerificationDto>.Success(dto);
+    }
+
+    private string BuildVerificationUrl(string token)
+    {
+        var frontendBaseUrl = _configuration["AppConfig:FrontendBaseUrl"] ?? "http://localhost:5173";
+        return $"{frontendBaseUrl.TrimEnd('/')}/verify-convention/{token}";
     }
 }

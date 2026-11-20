@@ -5,16 +5,13 @@ import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFolderOpen, faCheck, faTimes, faFilePdf, faPlus, faBuilding,
-  faSearch, faFilter, faRotateLeft, faArrowRight, faPaperPlane,
+  faSearch, faFilter, faRotateLeft, faPaperPlane,
   faPlay, faUser, faCalendar, faIdCard, faBriefcase, faTriangleExclamation,
-  faChevronUp, faChevronDown, faHourglass
+  faHourglass, faPenToSquare, faSignature, faChalkboardUser, faFileContract
 } from '@fortawesome/free-solid-svg-icons';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { Internship, InternshipStatus } from '../../types';
-
-interface CompanyRef { id: string; name: string; city: string; }
-interface TrackRef { id: string; code: string; name: string; }
+import { Internship, CompanyRef, Track, Teacher, ConventionParty, apiErrorMessage } from '../../types';
 
 const WORKFLOW_STEPS = [
   { key: 'Brouillon', label: 'Brouillon' },
@@ -91,10 +88,17 @@ export const InternshipsPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const isStudent = user?.role === 'Etudiant';
+  const isCoord = user?.role === 'ResponsableFiliere' || user?.role === 'Admin';
+
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [openProposeModal, setOpenProposeModal] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [approveId, setApproveId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [assignTarget, setAssignTarget] = useState<Internship | null>(null);
+  const [assignSupervisorId, setAssignSupervisorId] = useState('');
 
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('Tous');
@@ -121,69 +125,86 @@ export const InternshipsPage: React.FC = () => {
     enabled: openProposeModal,
   });
 
-  const { data: tracks = [] } = useQuery<TrackRef[]>({
+  const { data: tracks = [] } = useQuery<Track[]>({
     queryKey: ['tracks'],
     queryFn: async () => { const res = await api.get('/tracks'); return res.data; },
     enabled: openProposeModal,
   });
 
-  const submitMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`/internships/${id}/submit`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['internships'] }),
+  const { data: teachers = [] } = useQuery<Teacher[]>({
+    queryKey: ['teachers'],
+    queryFn: async () => { const res = await api.get('/teachers'); return res.data; },
+    enabled: isCoord && !!assignTarget,
   });
 
-  const approveMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`/internships/${id}/approve`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['internships'] }); setApproveId(null); },
+  /** Mutation standard : rafraîchit la liste et affiche l'erreur métier renvoyée par l'API. */
+  const useAction = <T,>(fn: (arg: T) => Promise<unknown>, onDone?: () => void) => useMutation({
+    mutationFn: async (arg: T) => { setActionError(''); await fn(arg); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['internships'] }); onDone?.(); },
+    onError: (err: any) => setActionError(apiErrorMessage(err, "L'action a échoué.")),
   });
 
-  const startMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`/internships/${id}/start`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['internships'] }),
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/internships/${id}/reject`, { rejectionReason: reason }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['internships'] }); setRejectId(null); setRejectReason(''); },
-  });
+  const submitMutation = useAction((id: string) => api.post(`/internships/${id}/submit`));
+  const reopenMutation = useAction((id: string) => api.post(`/internships/${id}/reopen`));
+  const startMutation = useAction((id: string) => api.post(`/internships/${id}/start`));
+  const approveMutation = useAction((id: string) => api.post(`/internships/${id}/approve`), () => setApproveId(null));
+  const rejectMutation = useAction(
+    ({ id, reason }: { id: string; reason: string }) => api.post(`/internships/${id}/reject`, { rejectionReason: reason }),
+    () => { setRejectId(null); setRejectReason(''); });
+  const signMutation = useAction(
+    ({ id, party }: { id: string; party: ConventionParty }) => api.post(`/conventions/internship/${id}/sign`, { party }));
+  const assignMutation = useAction(
+    ({ id, supervisorId }: { id: string; supervisorId: string }) => api.post(`/internships/${id}/assign-supervisor`, { supervisorId }),
+    () => { setAssignTarget(null); setAssignSupervisorId(''); });
 
   const proposeMutation = useMutation({
     mutationFn: async () => {
       setProposeError('');
       const selectedCompId = companyId || (companies.length > 0 ? companies[0].id : '');
-      const selectedTrackId = trackId || (tracks.length > 0 ? tracks[0].id : '');
-      if (!selectedCompId || !selectedTrackId) throw new Error('Veuillez sélectionner une entreprise et une filière.');
-      await api.post('/internships', {
+      if (!selectedCompId) throw new Error('Veuillez sélectionner une entreprise.');
+      const payload = {
         title, subjectDescription,
-        companyId: selectedCompId, academicTrackId: selectedTrackId,
+        companyId: selectedCompId,
         companySupervisorName: supervisorName, companySupervisorEmail: supervisorEmail,
-        companySupervisorPhone: supervisorPhone,
+        companySupervisorPhone: supervisorPhone || null,
         startDate: new Date(startDate).toISOString(), endDate: new Date(endDate).toISOString(),
-      });
+      };
+
+      if (editId) {
+        await api.put(`/internships/${editId}`, payload);
+      } else {
+        const selectedTrackId = user?.academicTrackId || trackId || (tracks.length > 0 ? tracks[0].id : '');
+        if (!selectedTrackId) throw new Error('Votre compte doit être rattaché à une filière.');
+        await api.post('/internships', { ...payload, academicTrackId: selectedTrackId });
+      }
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['internships'] }); setOpenProposeModal(false); resetProposeForm(); },
-    onError: (err: any) => { setProposeError(err.response?.data?.detail || err.message || 'Erreur lors de la création du stage.'); },
+    onError: (err: any) => { setProposeError(apiErrorMessage(err, "Erreur lors de l'enregistrement du dossier.")); },
   });
 
   const resetProposeForm = () => {
-    setTitle(''); setSubjectDescription('');
+    setEditId(null);
+    setTitle(''); setSubjectDescription(''); setCompanyId('');
     setSupervisorName(''); setSupervisorEmail(''); setSupervisorPhone(''); setProposeError('');
   };
 
-  const getStatusString = (i: Internship): string => {
-    if (i.statusName) return i.statusName;
-    if (typeof i.status === 'string') return i.status;
-    const num = Number(i.status);
-    switch (num) {
-      case 1: return 'Brouillon'; case 2: return 'Propose'; case 3: return 'Valide';
-      case 4: return 'Refuse'; case 5: return 'EnCours';
-      case 6: return 'SoutenancePlanifiee'; case 7: return 'Termine'; default: return String(i.status || '');
-    }
+  const openCreateModal = () => { resetProposeForm(); setOpenProposeModal(true); };
+
+  const openEditModal = (i: Internship) => {
+    resetProposeForm();
+    setEditId(i.id);
+    setTitle(i.title); setSubjectDescription(i.subjectDescription); setCompanyId(i.companyId);
+    setSupervisorName(i.companySupervisorName); setSupervisorEmail(i.companySupervisorEmail);
+    setSupervisorPhone(i.companySupervisorPhone || '');
+    setStartDate(i.startDate.substring(0, 10)); setEndDate(i.endDate.substring(0, 10));
+    setOpenProposeModal(true);
   };
+
+  const getStatusString = (i: Internship): string => i.statusName || i.status;
 
   const handleDownloadPdf = async (id: string) => {
     try {
+      setActionError('');
       const response = await api.get(`/conventions/internship/${id}/pdf`, { responseType: 'blob' });
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
@@ -191,7 +212,7 @@ export const InternshipsPage: React.FC = () => {
       link.href = url; link.setAttribute('download', `convention_${id}.pdf`);
       document.body.appendChild(link); link.click(); link.remove();
       window.URL.revokeObjectURL(url);
-    } catch { alert("La convention de stage n'est pas encore disponible."); }
+    } catch { setActionError("La convention de stage n'est pas encore disponible."); }
   };
 
   const filteredInternships = useMemo(() => {
@@ -236,7 +257,7 @@ export const InternshipsPage: React.FC = () => {
         </div>
         {user?.role === 'Etudiant' && (
           <button
-            onClick={() => setOpenProposeModal(true)}
+            onClick={openCreateModal}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors text-sm"
           >
             <FontAwesomeIcon icon={faPlus} />
@@ -308,6 +329,15 @@ export const InternshipsPage: React.FC = () => {
         </div>
       </div>
 
+      {actionError && (
+        <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded text-sm text-red-700 flex justify-between items-center">
+          <span><FontAwesomeIcon icon={faTriangleExclamation} className="mr-2" />{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-red-500 hover:text-red-700" aria-label="Fermer">
+            <FontAwesomeIcon icon={faTimes} />
+          </button>
+        </div>
+      )}
+
       {/* Content */}
       {isLoading ? (
         <Card style={{ padding: '40px', textAlign: 'center' }}>
@@ -328,7 +358,7 @@ export const InternshipsPage: React.FC = () => {
               Consulter les offres disponibles
             </Button>
             {user?.role === 'Etudiant' && (
-              <Button onClick={() => setOpenProposeModal(true)}>Proposer un stage spontané</Button>
+              <Button onClick={openCreateModal}>Proposer un stage spontané</Button>
             )}
           </div>
         </Card>
@@ -336,12 +366,13 @@ export const InternshipsPage: React.FC = () => {
         <div className="flex flex-col gap-4">
           {filteredInternships.map((i) => {
             const st = getStatusString(i);
-            const isSupervisor = user?.role === 'ResponsableFiliere' || user?.role === 'Admin';
-            const numericStatus = Number(i.status);
-            const isPropose = st === 'Propose' || numericStatus === 2;
-            const isValide = st === 'Valide' || numericStatus === 3;
-            const isBrouillon = st === 'Brouillon' || numericStatus === 1;
-            const isPdfReady = ['Valide', 'EnCours', 'SoutenancePlanifiee', 'Termine'].includes(st) || numericStatus >= 3;
+            const isPropose = st === 'Propose';
+            const isValide = st === 'Valide';
+            const isBrouillon = st === 'Brouillon';
+            const isRefuse = st === 'Refuse';
+            const isActiveFile = ['Valide', 'EnCours', 'SoutenancePlanifiee'].includes(st);
+            const conv = i.convention;
+            const isPdfReady = !!conv;
             const statusCfg = STATUS_CONFIG[st] || { label: st, colorScheme: '9', className: 'bg-gray-100 text-gray-700' };
             const barColor = STATUS_BAR_COLOR[st] || '#bdbdbd';
 
@@ -368,7 +399,7 @@ export const InternshipsPage: React.FC = () => {
                       <div className="flex items-center gap-3 flex-wrap mb-2">
                         <span className="text-blue-600 font-semibold flex items-center gap-1 text-sm">
                           <FontAwesomeIcon icon={faBuilding} />
-                          {i.companyName}{(i as any).companyCity ? ` · ${(i as any).companyCity}` : ''}
+                          {i.companyName}
                         </span>
                         {i.academicTrackCode && (
                           <Tag colorScheme="8">{i.academicTrackCode}</Tag>
@@ -388,10 +419,35 @@ export const InternshipsPage: React.FC = () => {
                         </div>
                       )}
 
-                      {showStudentName && (i as any).studentName && (
+                      {showStudentName && i.studentName && (
                         <div className="flex items-center gap-1 text-xs text-gray-600 mb-1.5">
                           <FontAwesomeIcon icon={faUser} />
-                          <strong>{(i as any).studentName}</strong>
+                          <strong>{i.studentName}</strong>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1 text-xs text-gray-500 mb-1.5">
+                        <FontAwesomeIcon icon={faChalkboardUser} />
+                        Encadrant pédagogique : {i.academicSupervisorName
+                          ? <strong className="ml-0.5">{i.academicSupervisorName}</strong>
+                          : <em className="ml-0.5 text-amber-700">non affecté</em>}
+                      </div>
+
+                      {conv && (
+                        <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded text-xs text-slate-700">
+                          <div className="flex items-center gap-1 font-semibold mb-1">
+                            <FontAwesomeIcon icon={faFileContract} /> Convention {conv.conventionNumber}
+                            {conv.signedAt
+                              ? <span className="ml-1 text-green-700">— signée par les trois parties</span>
+                              : <span className="ml-1 text-amber-700">— en attente de signatures</span>}
+                          </div>
+                          <div className="flex gap-3 flex-wrap">
+                            {([['Élève', conv.isSignedByStudent], ['Entreprise', conv.isSignedByCompany], ['École', conv.isSignedBySchool]] as const).map(([label, ok]) => (
+                              <span key={label} className={ok ? 'text-green-700' : 'text-gray-400'}>
+                                <FontAwesomeIcon icon={ok ? faCheck : faHourglass} className="mr-1" />{label}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
 
@@ -422,12 +478,44 @@ export const InternshipsPage: React.FC = () => {
                           Télécharger la convention PDF
                         </button>
                       )}
-                      {user?.role === 'Etudiant' && isBrouillon && (
-                        <Button design="Emphasized" onClick={() => submitMutation.mutate(i.id)}>
-                          <FontAwesomeIcon icon={faPaperPlane} className="mr-1" /> Soumettre
+                      {isStudent && isBrouillon && (
+                        <>
+                          <Button onClick={() => openEditModal(i)}>
+                            <FontAwesomeIcon icon={faPenToSquare} className="mr-1" /> Modifier
+                          </Button>
+                          <Button design="Emphasized" onClick={() => submitMutation.mutate(i.id)} disabled={submitMutation.isPending}>
+                            <FontAwesomeIcon icon={faPaperPlane} className="mr-1" /> Soumettre
+                          </Button>
+                        </>
+                      )}
+                      {isStudent && isRefuse && (
+                        <Button onClick={() => reopenMutation.mutate(i.id)} disabled={reopenMutation.isPending}>
+                          <FontAwesomeIcon icon={faRotateLeft} className="mr-1" /> Retravailler le dossier
                         </Button>
                       )}
-                      {isSupervisor && isPropose && (
+                      {isStudent && conv && !conv.isSignedByStudent && isActiveFile && (
+                        <Button design="Emphasized" onClick={() => signMutation.mutate({ id: i.id, party: 'Student' })} disabled={signMutation.isPending}>
+                          <FontAwesomeIcon icon={faSignature} className="mr-1" /> Signer la convention
+                        </Button>
+                      )}
+                      {isCoord && conv && !conv.isSignedBySchool && isActiveFile && (
+                        <Button onClick={() => signMutation.mutate({ id: i.id, party: 'School' })} disabled={signMutation.isPending}>
+                          <FontAwesomeIcon icon={faSignature} className="mr-1" /> Signer pour l'école
+                        </Button>
+                      )}
+                      {isCoord && conv && !conv.isSignedByCompany && isActiveFile && (
+                        <Button onClick={() => signMutation.mutate({ id: i.id, party: 'Company' })} disabled={signMutation.isPending}
+                          tooltip="À utiliser à réception de l'exemplaire signé par l'entreprise">
+                          <FontAwesomeIcon icon={faBuilding} className="mr-1" /> Enregistrer la signature entreprise
+                        </Button>
+                      )}
+                      {isCoord && !['Refuse', 'Termine'].includes(st) && (
+                        <Button onClick={() => { setAssignTarget(i); setAssignSupervisorId(i.academicSupervisorId || ''); }}>
+                          <FontAwesomeIcon icon={faChalkboardUser} className="mr-1" />
+                          {i.academicSupervisorId ? "Changer d'encadrant" : 'Affecter un encadrant'}
+                        </Button>
+                      )}
+                      {isCoord && isPropose && (
                         <>
                           <Button design="Positive" onClick={() => setApproveId(i.id)}>
                             <FontAwesomeIcon icon={faCheck} className="mr-1" /> Valider
@@ -437,7 +525,7 @@ export const InternshipsPage: React.FC = () => {
                           </Button>
                         </>
                       )}
-                      {isSupervisor && isValide && (
+                      {isCoord && isValide && (
                         <Button design="Emphasized" onClick={() => startMutation.mutate(i.id)}>
                           <FontAwesomeIcon icon={faPlay} className="mr-1" /> Démarrer le stage
                         </Button>
@@ -499,12 +587,12 @@ export const InternshipsPage: React.FC = () => {
 
       {/* Dialog: Proposer un stage spontané */}
       {openProposeModal && (
-        <Dialog open headerText="Proposer un stage spontané"
+        <Dialog open headerText={editId ? 'Modifier le brouillon' : 'Proposer un stage spontané'}
           footer={
             <div className="flex justify-end gap-2 p-2">
-              <Button onClick={() => setOpenProposeModal(false)}>Annuler</Button>
+              <Button onClick={() => { setOpenProposeModal(false); resetProposeForm(); }}>Annuler</Button>
               <Button design="Emphasized" onClick={() => proposeMutation.mutate()} disabled={proposeMutation.isPending}>
-                {proposeMutation.isPending ? 'Enregistrement...' : 'Créer le dossier'}
+                {proposeMutation.isPending ? 'Enregistrement...' : editId ? 'Enregistrer les modifications' : 'Créer le dossier'}
               </Button>
             </div>
           }
@@ -543,7 +631,9 @@ export const InternshipsPage: React.FC = () => {
               </div>
               <div>
                 <Text style={{ fontWeight: 600, fontSize: '13px' }}>Filière ENSA :</Text>
-                <select value={trackId || (tracks[0]?.id || '')} onChange={(e) => setTrackId(e.target.value)}
+                {/* L'élève ne peut proposer un stage que dans sa propre filière (contrôlé aussi côté serveur). */}
+                <select value={user?.academicTrackId || trackId || (tracks[0]?.id || '')} onChange={(e) => setTrackId(e.target.value)}
+                  disabled={!!user?.academicTrackId || !!editId}
                   style={{ ...inputSelectStyle, marginTop: '4px' }}>
                   {tracks.map((t) => <option key={t.id} value={t.id}>{t.code} - {t.name}</option>)}
                 </select>
@@ -586,6 +676,34 @@ export const InternshipsPage: React.FC = () => {
                   style={{ ...inputSelectStyle, marginTop: '4px' }} />
               </div>
             </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Dialog: Affecter un encadrant pédagogique */}
+      {assignTarget && (
+        <Dialog open headerText="Affecter un encadrant pédagogique"
+          footer={
+            <div className="flex justify-end gap-2 p-2">
+              <Button onClick={() => setAssignTarget(null)}>Annuler</Button>
+              <Button design="Emphasized" disabled={!assignSupervisorId || assignMutation.isPending}
+                onClick={() => assignMutation.mutate({ id: assignTarget.id, supervisorId: assignSupervisorId })}>
+                {assignMutation.isPending ? 'Affectation...' : 'Affecter'}
+              </Button>
+            </div>
+          }
+        >
+          <div className="p-4 flex flex-col gap-3" style={{ minWidth: '400px' }}>
+            <Text><strong>{assignTarget.title}</strong>{assignTarget.studentName ? ` — ${assignTarget.studentName}` : ''}</Text>
+            <select value={assignSupervisorId} onChange={(e) => setAssignSupervisorId(e.target.value)} style={inputSelectStyle}>
+              <option value="">-- Choisir un enseignant --</option>
+              {teachers.map((t) => (
+                <option key={t.id} value={t.id}>{t.fullName} ({t.role === 'ResponsableFiliere' ? 'Responsable' : 'Encadrant'})</option>
+              ))}
+            </select>
+            <Text style={{ fontSize: '12px', color: '#666' }}>
+              L'encadrant pourra consulter le dossier, relire et valider les rapports hebdomadaires.
+            </Text>
           </div>
         </Dialog>
       )}

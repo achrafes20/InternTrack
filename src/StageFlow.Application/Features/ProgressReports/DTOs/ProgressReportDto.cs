@@ -14,7 +14,9 @@ public record ProgressReportDto(
     string? AiSummary,
     ReportStatus Status,
     DateTime CreatedAt,
-    List<ReportCommentDto> Comments);
+    List<ReportCommentDto> Comments,
+    string? InternshipTitle = null,
+    string? StudentName = null);
 
 public record ReportCommentDto(
     Guid Id,
@@ -29,13 +31,9 @@ public class CreateReportCommand
     public int WeekNumber { get; set; } = 1;
     public string Title { get; set; } = string.Empty;
     public string ActivitiesPerformed { get; set; } = string.Empty;
-    public string? Content { set { if (string.IsNullOrEmpty(ActivitiesPerformed)) ActivitiesPerformed = value ?? string.Empty; } }
-    public string? TasksCompleted { set { if (!string.IsNullOrEmpty(value)) ActivitiesPerformed = string.IsNullOrEmpty(ActivitiesPerformed) ? value : ActivitiesPerformed + "\n" + value; } }
     public string SkillsAcquired { get; set; } = string.Empty;
     public string DifficultiesEncountered { get; set; } = string.Empty;
-    public string? Difficulties { set { if (string.IsNullOrEmpty(DifficultiesEncountered)) DifficultiesEncountered = value ?? string.Empty; } }
     public string NextWeekGoals { get; set; } = string.Empty;
-    public string? TasksPlanned { set { if (string.IsNullOrEmpty(NextWeekGoals)) NextWeekGoals = value ?? string.Empty; } }
 }
 
 public record AddCommentCommand(

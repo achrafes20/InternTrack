@@ -6,11 +6,12 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBriefcase, faLocationDot, faClock, faCoins, faSearch,
   faRotateLeft, faMagnifyingGlass, faCheck, faArrowRight,
-  faTriangleExclamation, faBuilding, faGraduationCap
+  faTriangleExclamation, faBuilding, faGraduationCap, faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { InternshipOffer } from '../../types';
+import { InternshipOffer, apiErrorMessage } from '../../types';
+import { CreateOfferDialog, CreateCompanyDialog } from './OfferManagementDialogs';
 
 const TRACK_COLORS: Record<string, string> = {
   GI: '#2563eb', GC: '#059669', GE: '#7c3aed',
@@ -27,12 +28,17 @@ export const OffersPage: React.FC = () => {
   const [city, setCity] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
 
+  const isCoord = user?.role === 'ResponsableFiliere';
+  const isAdmin = user?.role === 'Admin';
+  const [openCreateOffer, setOpenCreateOffer] = useState(false);
+  const [openCreateCompany, setOpenCreateCompany] = useState(false);
+
   const [selectedOffer, setSelectedOffer] = useState<InternshipOffer | null>(null);
   const [postulerTitle, setPostulerTitle] = useState('');
   const [postulerDesc, setPostulerDesc] = useState('');
-  const [supervisorName, setSupervisorName] = useState('Karim Idrissi');
-  const [supervisorEmail, setSupervisorEmail] = useState('k.idrissi@entreprise.ma');
-  const [supervisorPhone, setSupervisorPhone] = useState('+212600112233');
+  const [supervisorName, setSupervisorName] = useState('');
+  const [supervisorEmail, setSupervisorEmail] = useState('');
+  const [supervisorPhone, setSupervisorPhone] = useState('');
   const [startDate, setStartDate] = useState('2026-03-01');
   const [endDate, setEndDate] = useState('2026-08-31');
   const [applyError, setApplyError] = useState('');
@@ -63,12 +69,12 @@ export const OffersPage: React.FC = () => {
         title: postulerTitle, subjectDescription: postulerDesc,
         companyId: selectedOffer.companyId, academicTrackId: selectedOffer.academicTrackId,
         companySupervisorName: supervisorName, companySupervisorEmail: supervisorEmail,
-        companySupervisorPhone: supervisorPhone, internshipOfferId: selectedOffer.id,
+        companySupervisorPhone: supervisorPhone || null, internshipOfferId: selectedOffer.id,
         startDate: new Date(startDate).toISOString(), endDate: new Date(endDate).toISOString(),
       });
     },
     onSuccess: () => { setSelectedOffer(null); queryClient.invalidateQueries({ queryKey: ['internships'] }); navigate('/internships'); },
-    onError: (err: any) => { setApplyError(err.response?.data?.detail || 'Erreur lors de la soumission du dossier.'); },
+    onError: (err: any) => { setApplyError(apiErrorMessage(err, 'Erreur lors de la soumission du dossier.')); },
   });
 
   const handleOpenApply = (offer: InternshipOffer) => {
@@ -96,7 +102,24 @@ export const OffersPage: React.FC = () => {
             </div>
           </div>
         </div>
+        {(isCoord || isAdmin) && (
+          <div className="flex gap-2 mt-4 flex-wrap">
+            <button onClick={() => setOpenCreateOffer(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-blue-700 hover:bg-blue-50 rounded-lg font-semibold text-sm">
+              <FontAwesomeIcon icon={faPlus} /> Publier une offre
+            </button>
+            {isAdmin && (
+              <button onClick={() => setOpenCreateCompany(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 text-white rounded-lg font-semibold text-sm">
+                <FontAwesomeIcon icon={faBuilding} /> Ajouter une entreprise
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {openCreateOffer && <CreateOfferDialog onClose={() => setOpenCreateOffer(false)} />}
+      {openCreateCompany && <CreateCompanyDialog onClose={() => setOpenCreateCompany(false)} />}
 
       {/* Filters */}
       <div className="bg-white rounded-2xl p-5 border border-gray-200/80 shadow-sm flex flex-col gap-3">
@@ -248,7 +271,11 @@ export const OffersPage: React.FC = () => {
                       <span><FontAwesomeIcon icon={faCoins} className="mr-1" />Non précisée</span>
                     )}
                   </div>
-                  {user?.role === 'Etudiant' ? (
+                  {user?.role === 'Etudiant' && user.academicTrackId && user.academicTrackId !== offer.academicTrackId ? (
+                    <span className="px-2.5 py-1 bg-gray-100 text-gray-500 rounded-xl text-xs font-semibold" title="Vous ne pouvez postuler qu'aux offres de votre filière">
+                      Autre filière
+                    </span>
+                  ) : user?.role === 'Etudiant' ? (
                     <button
                       onClick={() => handleOpenApply(offer)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors"

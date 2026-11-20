@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,24 +14,24 @@ public class ProgressReportConfiguration : IEntityTypeConfiguration<ProgressRepo
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.Title)
-            .HasMaxLength(200)
+            .HasMaxLength(FieldLimits.ReportTitle)
             .IsRequired();
 
         builder.Property(r => r.ActivitiesPerformed)
-            .HasMaxLength(5000)
+            .HasMaxLength(FieldLimits.ReportActivities)
             .IsRequired();
 
         builder.Property(r => r.SkillsAcquired)
-            .HasMaxLength(2000);
+            .HasMaxLength(FieldLimits.ReportSection);
 
         builder.Property(r => r.DifficultiesEncountered)
-            .HasMaxLength(2000);
+            .HasMaxLength(FieldLimits.ReportSection);
 
         builder.Property(r => r.NextWeekGoals)
-            .HasMaxLength(2000);
+            .HasMaxLength(FieldLimits.ReportSection);
 
         builder.Property(r => r.AiSummary)
-            .HasMaxLength(3000);
+            .HasMaxLength(FieldLimits.AiSummary);
 
         builder.Property(r => r.Status)
             .HasConversion<int>()

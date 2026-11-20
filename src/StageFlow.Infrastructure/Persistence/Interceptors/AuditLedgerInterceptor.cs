@@ -8,6 +8,16 @@ namespace StageFlow.Infrastructure.Persistence.Interceptors;
 
 public class AuditLedgerInterceptor : SaveChangesInterceptor
 {
+    /// <summary>
+    /// Propriétés jamais recopiées dans le journal : il est immuable (trigger append-only),
+    /// une fuite y serait donc définitive.
+    /// </summary>
+    private static readonly HashSet<string> SensitiveProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PasswordHash", "SecurityStamp", "ConcurrencyStamp", "Token", "VerificationToken",
+        "TwoFactorEnabled", "AuthenticatorKey", "PhoneNumber"
+    };
+
     private readonly ICurrentUserService _currentUserService;
 
     public AuditLedgerInterceptor(ICurrentUserService currentUserService)
@@ -34,7 +44,7 @@ public class AuditLedgerInterceptor : SaveChangesInterceptor
         var entries = context.ChangeTracker.Entries()
             .Where(e => e.Entity is not AuditLog && 
                         e.Entity is not RefreshToken &&
-                        !e.Entity.GetType().Namespace!.StartsWith("Microsoft.AspNetCore.Identity") &&
+                        e.Entity.GetType().Namespace?.StartsWith("Microsoft.AspNetCore.Identity") != true &&
                         (e.State == EntityState.Added || e.State == EntityState.Modified || e.State == EntityState.Deleted))
             .ToList();
 
@@ -56,11 +66,13 @@ public class AuditLedgerInterceptor : SaveChangesInterceptor
             {
                 foreach (var prop in entry.Properties.Where(p => p.IsModified))
                 {
-                    changesDict[prop.Metadata.Name] = new
-                    {
-                        Old = prop.OriginalValue,
-                        New = prop.CurrentValue
-                    };
+                    changesDict[prop.Metadata.Name] = SensitiveProperties.Contains(prop.Metadata.Name)
+                        ? "[REDACTED]"
+                        : new
+                        {
+                            Old = prop.OriginalValue,
+                            New = prop.CurrentValue
+                        };
                 }
             }
 

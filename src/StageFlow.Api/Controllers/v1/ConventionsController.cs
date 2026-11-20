@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StageFlow.Application.Common.Security;
+using StageFlow.Application.Features.Conventions.DTOs;
 using StageFlow.Application.Features.Conventions.Services;
+using StageFlow.Domain.Entities;
 
 namespace StageFlow.Api.Controllers.v1;
 
@@ -28,6 +30,32 @@ public class ConventionsController : ApiControllerBase
             return NotFound(new ProblemDetails { Title = "Convention non disponible", Detail = result.Error, Status = 404 });
 
         return File(result.Value!, "application/pdf", $"convention_{internshipId}.pdf");
+    }
+
+    /// <summary>
+    /// Enregistre la signature d'une partie :
+    /// - Student : uniquement l'élève propriétaire du stage ;
+    /// - School : le responsable de la filière (ou un administrateur) ;
+    /// - Company : le responsable de filière (ou un administrateur), à réception de l'exemplaire signé par l'entreprise.
+    /// </summary>
+    [HttpPost("internship/{internshipId:guid}/sign")]
+    public async Task<IActionResult> Sign(Guid internshipId, [FromBody] SignConventionCommand command, CancellationToken cancellationToken)
+    {
+        var allowed = command.Party switch
+        {
+            ConventionParty.Student => _accessControl.IsStudent && await _accessControl.CanAccessInternshipAsync(internshipId, cancellationToken),
+            ConventionParty.School or ConventionParty.Company => await _accessControl.CanManageInternshipAsync(internshipId, cancellationToken),
+            _ => false
+        };
+
+        if (!allowed)
+            return Forbid();
+
+        var result = await _conventionService.SignAsync(internshipId, command.Party, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Signature impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
     }
 
     [HttpGet("verify/{token}")]

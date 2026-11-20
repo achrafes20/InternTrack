@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StageFlow.Application.Common.Interfaces;
@@ -13,7 +14,7 @@ public record CreateUserRequest(
     string? StudentNumber,
     Guid? AcademicTrackId);
 
-public record UpdateRoleRequest(string Role);
+public record UpdateRoleRequest(string Role, Guid? AcademicTrackId);
 
 [Authorize(Policy = "RequireAdminRole")]
 public class UsersController : ApiControllerBase
@@ -54,9 +55,21 @@ public class UsersController : ApiControllerBase
     [HttpPut("{id}/role")]
     public async Task<IActionResult> UpdateRole(string id, [FromBody] UpdateRoleRequest request, CancellationToken cancellationToken)
     {
-        var result = await _identityService.UpdateUserRoleAsync(id, request.Role, cancellationToken);
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var result = await _identityService.UpdateUserRoleAsync(id, request.Role, request.AcademicTrackId, currentUserId, cancellationToken);
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Erreur de mise à jour", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Déverrouille un compte bloqué après des échecs de connexion répétés.</summary>
+    [HttpPost("{id}/unlock")]
+    public async Task<IActionResult> Unlock(string id, CancellationToken cancellationToken)
+    {
+        var result = await _identityService.UnlockUserAsync(id, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Déverrouillage impossible", Detail = result.Error, Status = 400 });
 
         return NoContent();
     }

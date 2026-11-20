@@ -7,10 +7,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faUsers, faShieldHalved, faChalkboardUser, faUserGraduate,
   faUserPlus, faSearch, faTriangleExclamation, faCircle, faGraduationCap,
-  faRotateLeft
+  faRotateLeft, faUserPen, faLock, faLockOpen
 } from '@fortawesome/free-solid-svg-icons';
 import { apiClient } from '../../api/client';
-import { UserDto } from '../../types';
+import { UserDto, Track, apiErrorMessage } from '../../types';
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string; tagScheme: string; avatar: string; icon: any }> = {
   Admin: { label: 'Administrateur', color: '#dc2626', bg: '#fef2f2', tagScheme: '2', avatar: 'Accent2', icon: faShieldHalved },
@@ -26,9 +26,24 @@ export const UsersPage: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState('Etudiant');
-  const [password, setPassword] = useState('Password123!');
+  const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [searchText, setSearchText] = useState('');
+  const [trackId, setTrackId] = useState('');
+  const [studentNumber, setStudentNumber] = useState('');
+  const [roleTarget, setRoleTarget] = useState<UserDto | null>(null);
+  const [newRole, setNewRole] = useState('Etudiant');
+  const [newTrackId, setNewTrackId] = useState('');
+  const [roleError, setRoleError] = useState('');
+
+  const needsTrack = (r: string) => r === 'Etudiant' || r === 'ResponsableFiliere';
+
+  const { data: tracks = [] } = useQuery<Track[]>({
+    queryKey: ['tracks'],
+    queryFn: async () => (await apiClient.get('/tracks')).data
+  });
+
+  const trackCode = (id?: string) => tracks.find(t => t.id === id)?.code;
 
   const { data: users = [], isLoading } = useQuery<UserDto[]>({
     queryKey: ['users'],
@@ -38,16 +53,44 @@ export const UsersPage: React.FC = () => {
   const createUserMutation = useMutation({
     mutationFn: async () => {
       setErrorMessage('');
-      await apiClient.post('/users', { email, firstName, lastName, role, password });
+      await apiClient.post('/users', {
+        email, firstName, lastName, role, password,
+        academicTrackId: trackId || null,
+        studentNumber: role === 'Etudiant' ? studentNumber : null
+      });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['users'] }); setOpenModal(false); resetForm(); },
-    onError: (err: any) => { setErrorMessage(err.response?.data?.detail || "Erreur lors de la création de l'utilisateur."); }
+    onError: (err: any) => { setErrorMessage(apiErrorMessage(err, "Erreur lors de la création de l'utilisateur.")); }
   });
+
+  const unlockMutation = useMutation({
+    mutationFn: async (id: string) => { await apiClient.post(`/users/${id}/unlock`); },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  const updateRoleMutation = useMutation({
+    mutationFn: async () => {
+      if (!roleTarget) return;
+      setRoleError('');
+      await apiClient.put(`/users/${roleTarget.id}/role`, { role: newRole, academicTrackId: newTrackId || null });
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['users'] }); setRoleTarget(null); },
+    onError: (err: any) => setRoleError(apiErrorMessage(err, 'Erreur lors de la modification du rôle.'))
+  });
+
+  const openRoleDialog = (u: UserDto) => {
+    setRoleTarget(u); setNewRole(u.role); setNewTrackId(u.academicTrackId || ''); setRoleError('');
+  };
 
   const resetForm = () => {
     setEmail(''); setFirstName(''); setLastName('');
-    setRole('Etudiant'); setPassword('Password123!'); setErrorMessage('');
+    setRole('Etudiant'); setPassword(''); setErrorMessage('');
+    setTrackId(''); setStudentNumber('');
   };
+
+  const createDisabled = !email || !firstName || !lastName || !password
+    || (needsTrack(role) && !trackId) || (role === 'Etudiant' && !studentNumber)
+    || createUserMutation.isPending;
 
   const filtered = useMemo(() =>
     users.filter(u =>
@@ -165,12 +208,30 @@ export const UsersPage: React.FC = () => {
                       {u.isActive ? 'Actif' : 'Inactif'}
                     </span>
                   </div>
-                  {u.academicTrackCode && (
+                  {(u.academicTrackCode || trackCode(u.academicTrackId)) && (
                     <div className="mt-2 text-xs text-gray-500 flex items-center gap-1">
                       <FontAwesomeIcon icon={faGraduationCap} />
-                      Filière : <strong>{u.academicTrackCode}</strong>
+                      Filière : <strong>{u.academicTrackCode || trackCode(u.academicTrackId)}</strong>
                     </div>
                   )}
+                  {needsTrack(u.role) && !u.academicTrackId && (
+                    <div className="mt-2 text-xs text-amber-700 flex items-center gap-1">
+                      <FontAwesomeIcon icon={faTriangleExclamation} /> Aucune filière : ce compte ne voit aucun dossier.
+                    </div>
+                  )}
+                  {u.isLockedOut && (
+                    <div className="mt-2 flex items-center justify-between gap-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                      <span><FontAwesomeIcon icon={faLock} className="mr-1" />Verrouillé (échecs de connexion)</span>
+                      <button onClick={() => unlockMutation.mutate(u.id)} disabled={unlockMutation.isPending}
+                        className="px-2 py-1 bg-white border border-red-300 hover:bg-red-100 rounded font-semibold">
+                        <FontAwesomeIcon icon={faLockOpen} className="mr-1" />Déverrouiller
+                      </button>
+                    </div>
+                  )}
+                  <button onClick={() => openRoleDialog(u)}
+                    className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-lg text-xs font-semibold text-gray-700">
+                    <FontAwesomeIcon icon={faUserPen} /> Modifier le rôle / la filière
+                  </button>
                 </div>
               </div>
             );
@@ -185,7 +246,7 @@ export const UsersPage: React.FC = () => {
             <>
               <Button design="Transparent" onClick={() => setOpenModal(false)}>Annuler</Button>
               <Button design="Emphasized"
-                disabled={!email || !firstName || !lastName || !password || createUserMutation.isPending}
+                disabled={createDisabled}
                 onClick={() => createUserMutation.mutate()}
               >
                 {createUserMutation.isPending ? 'Création...' : 'Créer le compte'}
@@ -226,13 +287,72 @@ export const UsersPage: React.FC = () => {
               <option value="Admin">Administrateur — accès complet</option>
             </select>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block mb-1 font-semibold text-xs">
+                Filière {needsTrack(role) ? '(obligatoire)' : '(optionnel)'} :
+              </label>
+              <select style={selectStyle} value={trackId} onChange={(e) => setTrackId(e.target.value)}>
+                <option value="">-- Aucune --</option>
+                {tracks.map(t => <option key={t.id} value={t.id}>{t.code} — {t.name}</option>)}
+              </select>
+            </div>
+            {role === 'Etudiant' && (
+              <div>
+                <label className="block mb-1 font-semibold text-xs">Code Apogée :</label>
+                <Input value={studentNumber} onInput={(e: any) => setStudentNumber(e.target.value)}
+                  placeholder="Ex: E1452933" style={{ width: '100%' }} />
+              </div>
+            )}
+          </div>
           <div>
             <label className="block mb-1 font-semibold text-xs">Mot de passe initial :</label>
             <Input type="Password" value={password} onInput={(e: any) => setPassword(e.target.value)} style={{ width: '100%' }} />
-            <div className="text-xs text-gray-400 mt-1">Min. 8 caractères, 1 majuscule, 1 chiffre</div>
+            <div className="text-xs text-gray-400 mt-1">Min. 8 caractères, 1 majuscule, 1 minuscule, 1 chiffre, 1 caractère spécial</div>
           </div>
         </div>
       </Dialog>
+
+      {/* Role dialog */}
+      {roleTarget && (
+        <Dialog open headerText={`Rôle de ${roleTarget.firstName} ${roleTarget.lastName}`}
+          footer={
+            <Bar endContent={
+              <>
+                <Button design="Transparent" onClick={() => setRoleTarget(null)}>Annuler</Button>
+                <Button design="Emphasized" onClick={() => updateRoleMutation.mutate()}
+                  disabled={(needsTrack(newRole) && !newTrackId) || updateRoleMutation.isPending}>
+                  {updateRoleMutation.isPending ? 'Enregistrement...' : 'Enregistrer'}
+                </Button>
+              </>
+            } />
+          }
+        >
+          <div className="flex flex-col gap-4 p-4" style={{ minWidth: '380px' }}>
+            {roleError && (
+              <div className="p-2.5 bg-red-50 text-red-700 rounded-lg text-sm">
+                <FontAwesomeIcon icon={faTriangleExclamation} className="mr-1" /> {roleError}
+              </div>
+            )}
+            <div>
+              <label className="block mb-1 font-semibold text-xs">Rôle :</label>
+              <select style={selectStyle} value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+                {Object.entries(ROLE_CONFIG).map(([r, cfg]) => <option key={r} value={r}>{cfg.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block mb-1 font-semibold text-xs">Filière {needsTrack(newRole) ? '(obligatoire)' : '(optionnel)'} :</label>
+              <select style={selectStyle} value={newTrackId} onChange={(e) => setNewTrackId(e.target.value)}>
+                <option value="">-- Aucune --</option>
+                {tracks.map(t => <option key={t.id} value={t.id}>{t.code} — {t.name}</option>)}
+              </select>
+            </div>
+            <div className="text-xs text-gray-500">
+              Les sessions ouvertes de cet utilisateur seront fermées : il devra se reconnecter pour obtenir ses nouveaux droits.
+            </div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 };

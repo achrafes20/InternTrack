@@ -301,7 +301,7 @@ public class StageFlowDbContextInitialiser
                 await _context.SaveChangesAsync(CancellationToken.None);
 
                 // Convention officielle
-                var convention = new Convention(stageAchraf.Id, $"CONV-ENSA-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}");
+                var convention = Convention.CreateFor(stageAchraf.Id, DateTime.UtcNow);
                 convention.SignByStudent();
                 convention.SignByCompany();
                 convention.SignBySchool();
@@ -363,7 +363,7 @@ public class StageFlowDbContextInitialiser
                 await _context.Internships.AddAsync(stageValide);
                 await _context.SaveChangesAsync(CancellationToken.None);
 
-                var conv2 = new Convention(stageValide.Id, $"CONV-ENSA-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}");
+                var conv2 = Convention.CreateFor(stageValide.Id, DateTime.UtcNow);
                 conv2.SignByStudent();
                 conv2.SignBySchool();
                 await _context.Conventions.AddAsync(conv2);
@@ -424,6 +424,12 @@ public class StageFlowDbContextInitialiser
                 await _context.Defenses.AddAsync(defense);
                 await _context.DefenseJuryMembers.AddRangeAsync(jury1, jury2);
                 stageMehdi.MarkDefenseScheduled(respAlami.Id);
+
+                var convMehdi = Convention.CreateFor(stageMehdi.Id, DateTime.UtcNow);
+                convMehdi.SignByStudent();
+                convMehdi.SignByCompany();
+                convMehdi.SignBySchool();
+                await _context.Conventions.AddAsync(convMehdi);
             }
 
             await _context.SaveChangesAsync(CancellationToken.None);

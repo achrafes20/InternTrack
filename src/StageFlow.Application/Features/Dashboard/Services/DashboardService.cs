@@ -98,18 +98,17 @@ public class DashboardService : IDashboardService
             })
             .ToListAsync(cancellationToken);
 
-        var upcomingDtos = new List<UpcomingDefenseDto>(upcomingDefenses.Count);
-        foreach (var defense in upcomingDefenses)
-        {
-            var student = await _identityService.GetUserByIdAsync(defense.StudentId, cancellationToken);
-            var studentName = student.IsSuccess ? student.Value!.FullName : defense.StudentId;
-            upcomingDtos.Add(new UpcomingDefenseDto(
-                defense.Id,
-                studentName,
-                defense.Title,
-                defense.ScheduledAt,
-                defense.Classroom));
-        }
+        var names = await _identityService.GetUserNamesAsync(
+            upcomingDefenses.Select(d => d.StudentId).Distinct(), cancellationToken);
+
+        var upcomingDtos = upcomingDefenses
+            .Select(d => new UpcomingDefenseDto(
+                d.Id,
+                names.GetValueOrDefault(d.StudentId) ?? "Élève ingénieur",
+                d.Title,
+                d.ScheduledAt,
+                d.Classroom))
+            .ToList();
 
         return new DashboardStatsDto(
             totalInternships,

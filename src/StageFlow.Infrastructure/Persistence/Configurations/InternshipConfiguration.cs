@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,11 +14,11 @@ public class InternshipConfiguration : IEntityTypeConfiguration<Internship>
         builder.HasKey(i => i.Id);
 
         builder.Property(i => i.Title)
-            .HasMaxLength(250)
+            .HasMaxLength(FieldLimits.InternshipTitle)
             .IsRequired();
 
         builder.Property(i => i.SubjectDescription)
-            .HasMaxLength(4000)
+            .HasMaxLength(FieldLimits.LongDescription)
             .IsRequired();
 
         builder.OwnsOne(i => i.Period, period =>
@@ -36,25 +37,25 @@ public class InternshipConfiguration : IEntityTypeConfiguration<Internship>
             .IsRequired();
 
         builder.Property(i => i.RejectionReason)
-            .HasMaxLength(1000);
+            .HasMaxLength(FieldLimits.RejectionReason);
 
         builder.Property(i => i.StudentId)
-            .HasMaxLength(450)
+            .HasMaxLength(FieldLimits.UserId)
             .IsRequired();
 
         builder.Property(i => i.AcademicSupervisorId)
-            .HasMaxLength(450);
+            .HasMaxLength(FieldLimits.UserId);
 
         builder.Property(i => i.CompanySupervisorName)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.PersonName)
             .IsRequired();
 
         builder.Property(i => i.CompanySupervisorEmail)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.Email)
             .IsRequired();
 
         builder.Property(i => i.CompanySupervisorPhone)
-            .HasMaxLength(30);
+            .HasMaxLength(FieldLimits.Phone);
 
         builder.HasOne(i => i.Company)
             .WithMany(c => c.Internships)

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,18 +14,18 @@ public class AcademicTrackConfiguration : IEntityTypeConfiguration<AcademicTrack
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Code)
-            .HasMaxLength(20)
+            .HasMaxLength(FieldLimits.TrackCode)
             .IsRequired();
 
         builder.HasIndex(t => t.Code)
             .IsUnique();
 
         builder.Property(t => t.Name)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.TrackName)
             .IsRequired();
 
         builder.Property(t => t.Description)
-            .HasMaxLength(500);
+            .HasMaxLength(FieldLimits.TrackDescription);
     }
 }
 

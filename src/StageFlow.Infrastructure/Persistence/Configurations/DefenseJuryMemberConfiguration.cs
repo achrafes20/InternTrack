@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,11 +14,11 @@ public class DefenseJuryMemberConfiguration : IEntityTypeConfiguration<DefenseJu
         builder.HasKey(m => m.Id);
 
         builder.Property(m => m.TeacherId)
-            .HasMaxLength(450)
+            .HasMaxLength(FieldLimits.UserId)
             .IsRequired();
 
         builder.Property(m => m.TeacherFullName)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.PersonName)
             .IsRequired();
 
         builder.Property(m => m.Role)

@@ -18,5 +18,17 @@ public interface IApplicationDbContext
     DbSet<AuditLog> AuditLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Exécute une opération en exclusion mutuelle (verrou partagé par toutes les instances de l'API),
+    /// dans une transaction. À utiliser pour les opérations « vérifier puis écrire » sujettes aux courses,
+    /// comme la planification de soutenances.
+    /// </summary>
+    Task<T> RunExclusiveAsync<T>(string lockName, Func<Task<T>> action, CancellationToken cancellationToken);
+}
+
+public static class LockNames
+{
+    public const string DefenseScheduling = "stageflow:defense-scheduling";
 }
 

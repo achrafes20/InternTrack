@@ -8,11 +8,11 @@ namespace StageFlow.Api.Controllers.v1;
 
 public record CreateCompanyRequest(
     string Name,
-    string Industry,
+    string? Industry,
     string City,
-    string Address,
+    string? Address,
     string ContactEmail,
-    string ContactPhone,
+    string? ContactPhone,
     string? Website);
 
 [Authorize]
@@ -51,22 +51,36 @@ public class ReferenceDataController : ApiControllerBase
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> CreateCompany([FromBody] CreateCompanyRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest(new ProblemDetails { Title = "Entreprise invalide", Detail = "Le nom de l'entreprise est obligatoire.", Status = 400 });
+        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.City) || string.IsNullOrWhiteSpace(request.ContactEmail))
+            return BadRequest(new ProblemDetails { Title = "Entreprise invalide", Detail = "Le nom, la ville et l'email de contact sont obligatoires.", Status = 400 });
+
+        var name = request.Name.Trim();
+        if (await _context.Companies.AnyAsync(c => c.Name.ToLower() == name.ToLower(), cancellationToken))
+            return BadRequest(new ProblemDetails { Title = "Entreprise invalide", Detail = "Une entreprise portant ce nom existe déjà.", Status = 400 });
 
         var company = new Company(
-            request.Name.Trim(),
-            request.Industry,
-            request.City,
-            request.Address,
-            request.ContactEmail,
+            name,
+            request.Industry ?? string.Empty,
+            request.City.Trim(),
+            request.Address ?? string.Empty,
+            request.ContactEmail.Trim(),
             request.ContactPhone,
             request.Website);
 
         await _context.Companies.AddAsync(company, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return Ok(company);
+        return Created($"/api/v1/companies/{company.Id}", new
+        {
+            company.Id,
+            company.Name,
+            company.Industry,
+            company.City,
+            company.Address,
+            company.ContactEmail,
+            company.ContactPhone,
+            company.Website
+        });
     }
 
     [HttpGet("/api/v1/tracks")]

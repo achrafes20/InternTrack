@@ -19,6 +19,7 @@ public class AuthIntegrationTests : IClassFixture<WebApplicationFactory<Program>
             // Environnement de développement : active la clé JWT de dev et le seeding de démonstration.
             builder.UseEnvironment("Development");
             builder.UseSetting("UseInMemoryDatabase", "true");
+            builder.UseSetting("InMemoryDatabaseName", $"StageFlowTests-{Guid.NewGuid()}");
             builder.UseSetting("Database:AutoMigrate", "false");
             builder.UseSetting("Database:SeedDemoData", "true");
             builder.UseSetting("Smtp:Enabled", "false");

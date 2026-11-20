@@ -15,5 +15,7 @@ public record UserDto(
     string FullName,
     string Role,
     string? StudentNumber,
-    Guid? AcademicTrackId);
-
+    Guid? AcademicTrackId,
+    bool IsActive = true,
+    string? AcademicTrackCode = null,
+    bool IsLockedOut = false);

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,18 +14,18 @@ public class InternshipOfferConfiguration : IEntityTypeConfiguration<InternshipO
         builder.HasKey(o => o.Id);
 
         builder.Property(o => o.Title)
-            .HasMaxLength(250)
+            .HasMaxLength(FieldLimits.InternshipTitle)
             .IsRequired();
 
         builder.Property(o => o.Description)
-            .HasMaxLength(4000)
+            .HasMaxLength(FieldLimits.LongDescription)
             .IsRequired();
 
         builder.Property(o => o.RequiredSkills)
-            .HasMaxLength(500);
+            .HasMaxLength(FieldLimits.RequiredSkills);
 
         builder.Property(o => o.City)
-            .HasMaxLength(100)
+            .HasMaxLength(FieldLimits.City)
             .IsRequired();
 
         builder.Property(o => o.MonthlyStipend)

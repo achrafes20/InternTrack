@@ -87,7 +87,7 @@ public class ReportsController : ApiControllerBase
             return Forbid();
 
         var authorId = _currentUserService.UserId!;
-        var authorFullName = _currentUserService.UserEmail ?? "Encadrant";
+        var authorFullName = _currentUserService.UserFullName ?? _currentUserService.UserEmail ?? "Encadrant";
 
         var result = await _reportService.AddCommentAsync(id, command.Content, authorId, authorFullName, cancellationToken);
 

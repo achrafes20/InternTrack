@@ -1,4 +1,6 @@
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
+using StageFlow.Application.Common.Interfaces;
 using StageFlow.Application.Common.Security;
 using StageFlow.Application.Features.AuditLedger.Services;
 using StageFlow.Application.Features.Conventions.Services;
@@ -6,7 +8,9 @@ using StageFlow.Application.Features.Dashboard.Services;
 using StageFlow.Application.Features.Defenses.Services;
 using StageFlow.Application.Features.InternshipOffers.Services;
 using StageFlow.Application.Features.Internships.Services;
+using StageFlow.Application.Features.Notifications;
 using StageFlow.Application.Features.ProgressReports.Services;
+using StageFlow.Domain.Events;
 
 namespace StageFlow.Application;
 
@@ -23,8 +27,14 @@ public static class DependencyInjection
         services.AddScoped<IConventionService, ConventionService>();
         services.AddScoped<IAccessControlService, AccessControlService>();
 
+        // Validateurs d'entrée (FluentValidation), exécutés par un filtre MVC dans l'API.
+        services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+
+        // Réactions aux événements de domaine (notifications).
+        services.AddScoped<IDomainEventHandler<InternshipStatusChangedEvent>, InternshipStatusChangedNotificationHandler>();
+        services.AddScoped<IDomainEventHandler<DefenseScheduledEvent>, DefenseScheduledNotificationHandler>();
+        services.AddScoped<IDomainEventHandler<ProgressReportSubmittedEvent>, ProgressReportSubmittedNotificationHandler>();
+
         return services;
     }
 }
-
-

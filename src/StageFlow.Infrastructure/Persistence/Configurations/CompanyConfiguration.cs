@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,34 +14,34 @@ public class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.HasKey(c => c.Id);
 
         builder.Property(c => c.Name)
-            .HasMaxLength(200)
+            .HasMaxLength(FieldLimits.CompanyName)
             .IsRequired();
 
         builder.HasIndex(c => c.Name);
 
         builder.Property(c => c.Industry)
-            .HasMaxLength(100);
+            .HasMaxLength(FieldLimits.Industry);
 
         builder.Property(c => c.City)
-            .HasMaxLength(100)
+            .HasMaxLength(FieldLimits.City)
             .IsRequired();
 
         builder.Property(c => c.Country)
-            .HasMaxLength(100)
+            .HasMaxLength(FieldLimits.Country)
             .HasDefaultValue("Maroc");
 
         builder.Property(c => c.Address)
-            .HasMaxLength(300);
+            .HasMaxLength(FieldLimits.Address);
 
         builder.Property(c => c.ContactEmail)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.Email)
             .IsRequired();
 
         builder.Property(c => c.ContactPhone)
-            .HasMaxLength(30);
+            .HasMaxLength(FieldLimits.Phone);
 
         builder.Property(c => c.Website)
-            .HasMaxLength(200);
+            .HasMaxLength(FieldLimits.Website);
     }
 }
 

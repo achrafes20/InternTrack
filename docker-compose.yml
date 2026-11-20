@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: stageflow_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stageflow_password}
     ports:
-      - "5432:5432"
+      # Exposé uniquement sur la machine hôte, jamais sur le réseau.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -33,13 +34,18 @@ services:
       - JwtSettings__Secret=${JWT_SECRET:-StageFlow-Dev-Only-Secret-Key-Change-Me-In-Production-2026-ENSA-PFE!}
       - JwtSettings__Issuer=StageFlowEnsa
       - JwtSettings__Audience=StageFlowClient
-      - JwtSettings__AccessTokenExpirationMinutes=60
+      - JwtSettings__AccessTokenExpirationMinutes=15
       - JwtSettings__RefreshTokenExpirationDays=7
       - Database__AutoMigrate=true
       - Database__SeedDemoData=${SEED_DEMO_DATA:-true}
       - AppConfig__FrontendBaseUrl=http://localhost:3000
       - Cors__AllowedOrigins__0=http://localhost:3000
       - Smtp__Enabled=false
+      # nginx (conteneur client) est le proxy de confiance : seules les requêtes venant des
+      # réseaux privés Docker peuvent transmettre l'IP réelle via X-Forwarded-For.
+      - ReverseProxy__KnownNetworks__0=172.16.0.0/12
+      - ReverseProxy__KnownNetworks__1=192.168.0.0/16
+      - ReverseProxy__KnownNetworks__2=10.0.0.0/8
     ports:
       - "5000:8080"
     depends_on:

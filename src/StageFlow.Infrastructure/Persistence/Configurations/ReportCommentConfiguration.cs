@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,15 +14,15 @@ public class ReportCommentConfiguration : IEntityTypeConfiguration<ReportComment
         builder.HasKey(c => c.Id);
 
         builder.Property(c => c.Content)
-            .HasMaxLength(2000)
+            .HasMaxLength(FieldLimits.Comment)
             .IsRequired();
 
         builder.Property(c => c.AuthorId)
-            .HasMaxLength(450)
+            .HasMaxLength(FieldLimits.UserId)
             .IsRequired();
 
         builder.Property(c => c.AuthorFullName)
-            .HasMaxLength(150)
+            .HasMaxLength(FieldLimits.PersonName)
             .IsRequired();
 
         builder.HasOne(c => c.ProgressReport)

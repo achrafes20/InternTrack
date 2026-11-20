@@ -15,6 +15,7 @@ public interface IInternshipOfferService
         string? city,
         string? skill,
         Guid? academicTrackId,
+        bool includeClosed,
         int pageNumber,
         int pageSize,
         CancellationToken cancellationToken);
@@ -38,6 +39,7 @@ public class InternshipOfferService : IInternshipOfferService
         string? city,
         string? skill,
         Guid? academicTrackId,
+        bool includeClosed,
         int pageNumber,
         int pageSize,
         CancellationToken cancellationToken)
@@ -47,6 +49,13 @@ public class InternshipOfferService : IInternshipOfferService
             .Include(o => o.AcademicTrack)
             .AsNoTracking()
             .AsQueryable();
+
+        // Par défaut, seules les offres ouvertes (actives et non expirées) sont publiées.
+        if (!includeClosed)
+        {
+            var now = DateTime.UtcNow;
+            query = query.Where(o => o.IsActive && o.ExpirationDate >= now);
+        }
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
@@ -131,6 +140,18 @@ public class InternshipOfferService : IInternshipOfferService
         var track = await _context.AcademicTracks.FindAsync(new object[] { command.AcademicTrackId }, cancellationToken);
         if (track == null)
             return Result<InternshipOfferDto>.Failure("La filière spécifiée n'existe pas.");
+
+        if (string.IsNullOrWhiteSpace(command.Title) || string.IsNullOrWhiteSpace(command.City))
+            return Result<InternshipOfferDto>.Failure("Le titre et la ville de l'offre sont obligatoires.");
+
+        if (command.DurationInWeeks < 1 || command.DurationInWeeks > 52)
+            return Result<InternshipOfferDto>.Failure("La durée doit être comprise entre 1 et 52 semaines.");
+
+        if (command.MonthlyStipend is < 0)
+            return Result<InternshipOfferDto>.Failure("La gratification mensuelle ne peut pas être négative.");
+
+        if (command.ExpirationDate <= DateTime.UtcNow)
+            return Result<InternshipOfferDto>.Failure("La date d'expiration doit être dans le futur.");
 
         var offer = new InternshipOffer(
             command.Title,

@@ -1,10 +1,13 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using StageFlow.Api.Middleware;
 using StageFlow.Api.Services;
+using StageFlow.Api.Validation;
+using FluentValidation;
 using StageFlow.Application;
 using StageFlow.Application.Common.Interfaces;
 using StageFlow.Infrastructure;
@@ -20,15 +23,45 @@ builder.Host.UseSerilog((_, loggerConfiguration) =>
         .WriteTo.Console());
 
 // Controllers & JSON configuration
-builder.Services.AddControllers()
+builder.Services.AddControllers(options => options.Filters.Add<FluentValidationFilter>())
     .AddJsonOptions(options =>
     {
-        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        // Les énumérations sont échangées par leur nom : une valeur numérique hors enum (ex. rôle 0) est refusée.
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(allowIntegerValues: false));
     });
+
+// Reverse proxy (nginx, Azure Front Door…) : l'IP réelle du client n'est lue dans X-Forwarded-For
+// que si la requête provient d'un proxy de confiance. Sans cela, le rate limiting verrait l'IP du proxy
+// pour tous les utilisateurs, et un client direct pourrait usurper n'importe quelle IP.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+
+    foreach (var network in builder.Configuration.GetSection("ReverseProxy:KnownNetworks").Get<string[]>() ?? Array.Empty<string>())
+    {
+        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+    }
+
+    foreach (var proxy in builder.Configuration.GetSection("ReverseProxy:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+    {
+        options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
+    }
+});
 
 // Rate Limiting (Protection contre le brute force sur /login)
 builder.Services.AddRateLimiter(options =>
 {
+    options.AddPolicy("refresh_limiter", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+
     // Fenêtre fixe partitionnée par adresse IP : un attaquant ne peut pas
     // verrouiller la connexion de tous les utilisateurs en épuisant le quota.
     options.AddPolicy("login_limiter", context =>
@@ -65,6 +98,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddApplicationServices();
+builder.Services.AddValidatorsFromAssemblyContaining<FluentValidationFilter>(includeInternalTypes: true);
 builder.Services.AddInfrastructureServices(builder.Configuration, builder.Environment);
 
 // Health checks (API + PostgreSQL)
@@ -113,6 +147,9 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Doit précéder tout middleware qui lit l'IP ou le schéma (rate limiting, HTTPS, cookies Secure).
+app.UseForwardedHeaders();
 
 // Global Exception Handler
 app.UseMiddleware<GlobalExceptionHandlerMiddleware>();

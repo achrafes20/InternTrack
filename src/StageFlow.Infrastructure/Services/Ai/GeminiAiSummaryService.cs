@@ -58,10 +58,17 @@ Mets en avant la progression technique et les éventuels points d'alerte pour l'
                 }
             };
 
-            var response = await _httpClient.PostAsJsonAsync(
-                $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={apiKey}",
-                requestBody,
-                cancellationToken);
+            // La clé transite dans un en-tête (jamais dans l'URL, qui finit dans les logs des proxys).
+            var model = _configuration["Gemini:Model"] ?? "gemini-2.5-flash";
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent")
+            {
+                Content = JsonContent.Create(requestBody)
+            };
+            request.Headers.Add("x-goog-api-key", apiKey);
+
+            var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {

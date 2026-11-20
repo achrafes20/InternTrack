@@ -8,8 +8,13 @@ export const setAccessToken = (token: string | null) => {
 
 export const getAccessToken = () => inMemoryToken;
 
+// En local et sous Docker, l'API est servie sous le même domaine (/api via le proxy Vite ou nginx).
+// En déploiement séparé (ex. Azure Static Web Apps + App Service), VITE_API_BASE_URL pointe vers l'API.
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+const API_BASE_URL = `${API_ORIGIN}/api/v1`;
+
 export const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -24,6 +29,31 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+export interface RefreshResponse {
+  accessToken: string;
+  accessTokenExpiresAt: string;
+  user: any;
+}
+
+/**
+ * Renouvelle la session via le cookie HttpOnly.
+ * Les rafraîchissements sont sérialisés entre tous les onglets (Web Locks API) : le refresh token tourne
+ * à chaque utilisation, et deux onglets qui le présenteraient en même temps seraient pris pour un rejeu.
+ * Comme le cookie est partagé, l'onglet qui attend envoie le cookie déjà renouvelé par le premier.
+ * Le serveur tolère en plus une courte période de réutilisation pour les navigateurs sans Web Locks.
+ */
+export const refreshSession = async (): Promise<RefreshResponse> => {
+  const doRefresh = async () =>
+    (await axios.post<RefreshResponse>(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })).data;
+
+  const data = typeof navigator !== 'undefined' && navigator.locks
+    ? await navigator.locks.request('stageflow-session-refresh', doRefresh)
+    : await doRefresh();
+
+  setAccessToken(data.accessToken);
+  return data;
+};
 
 let isRefreshing = false;
 let failedQueue: Array<{
@@ -63,13 +93,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const { data } = await axios.post(
-          '/api/v1/auth/refresh',
-          {},
-          { withCredentials: true }
-        );
-
-        setAccessToken(data.accessToken);
+        const data = await refreshSession();
         processQueue(null, data.accessToken);
         originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
         return api(originalRequest);

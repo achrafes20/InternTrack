@@ -35,7 +35,7 @@ public static class DependencyInjection
         {
             if (configuration.GetValue<bool>("UseInMemoryDatabase"))
             {
-                options.UseInMemoryDatabase("StageFlowInMemoryDb");
+                options.UseInMemoryDatabase(configuration["InMemoryDatabaseName"] ?? "StageFlowInMemoryDb");
             }
             else
             {
@@ -44,6 +44,7 @@ public static class DependencyInjection
             }
         });
 
+        services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<StageFlowDbContext>());
         services.AddScoped<StageFlowDbContextInitialiser>();
 
@@ -56,6 +57,11 @@ public static class DependencyInjection
             options.Password.RequireUppercase = true;
             options.Password.RequireLowercase = true;
             options.User.RequireUniqueEmail = true;
+
+            // Verrouillage du compte après 5 échecs consécutifs, pendant 15 minutes.
+            options.Lockout.AllowedForNewUsers = true;
+            options.Lockout.MaxFailedAccessAttempts = configuration.GetValue("Security:MaxFailedLoginAttempts", 5);
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(configuration.GetValue("Security:LockoutMinutes", 15));
         })
         .AddRoles<IdentityRole>()
         .AddEntityFrameworkStores<StageFlowDbContext>()

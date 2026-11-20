@@ -5,6 +5,7 @@ namespace StageFlow.Application.Features.Defenses.DTOs;
 public record DefenseDto(
     Guid Id,
     Guid InternshipId,
+    string StudentId,
     string StudentName,
     string InternshipTitle,
     DateTime ScheduledAt,
@@ -25,7 +26,6 @@ public class ScheduleDefenseCommand
 {
     public Guid InternshipId { get; set; }
     public DateTime ScheduledAt { get; set; }
-    public DateTime? DefenseDate { set { if (value.HasValue) ScheduledAt = value.Value; } }
     public int DurationMinutes { get; set; } = 45;
     public string Classroom { get; set; } = string.Empty;
     public List<JuryMemberInput> JuryMembers { get; set; } = new();
@@ -47,16 +47,19 @@ public class ScheduleDefenseCommand
     }
 }
 
+/// <summary>
+/// Membre du jury. Les membres internes (président, rapporteur, examinateur) sont identifiés
+/// par l'identifiant de leur compte enseignant. Le tuteur entreprise est externe : seul son nom est requis.
+/// </summary>
 public class JuryMemberInput
 {
-    public string TeacherId { get; set; } = string.Empty;
-    public string TeacherFullName { get; set; } = string.Empty;
-    public string? TeacherName { set { if (!string.IsNullOrEmpty(value)) { TeacherFullName = value; if (string.IsNullOrEmpty(TeacherId)) TeacherId = value; } } }
+    public string? TeacherId { get; set; }
+    public string? TeacherFullName { get; set; }
     public DefenseRole Role { get; set; }
 
     public JuryMemberInput() { }
 
-    public JuryMemberInput(string teacherId, string teacherFullName, DefenseRole role)
+    public JuryMemberInput(string? teacherId, string? teacherFullName, DefenseRole role)
     {
         TeacherId = teacherId;
         TeacherFullName = teacherFullName;
@@ -64,28 +67,15 @@ public class JuryMemberInput
     }
 }
 
-public record CheckConflictRequest
+public class CheckConflictRequest
 {
-    public DateTime DefenseDate { get; set; }
+    public DateTime ScheduledAt { get; set; }
+    public int DurationMinutes { get; set; } = 45;
     public string Classroom { get; set; } = string.Empty;
-    public List<string>? JuryTeacherNames { get; set; } = new();
-    public List<string>? JuryTeacherIds { get; set; } = new();
+    public List<string> JuryTeacherIds { get; set; } = new();
 
-    public CheckConflictRequest() { }
-
-    public CheckConflictRequest(DateTime defenseDate, string classroom, List<string>? juryTeacherNames = null, List<string>? juryTeacherIds = null)
-    {
-        DefenseDate = defenseDate;
-        Classroom = classroom;
-        JuryTeacherNames = juryTeacherNames;
-        JuryTeacherIds = juryTeacherIds;
-    }
-
-    [System.Text.Json.Serialization.JsonPropertyName("scheduledAt")]
-    public DateTime? ScheduledAtAlias
-    {
-        set { if (value.HasValue && DefenseDate == default) DefenseDate = value.Value; }
-    }
+    /// <summary>Stage concerné : sa soutenance existante est ignorée lors d'une replanification.</summary>
+    public Guid? InternshipId { get; set; }
 }
 
 public record ConflictCheckResultDto(
@@ -95,3 +85,5 @@ public record ConflictCheckResultDto(
 public record RecordGradeCommand(
     decimal Grade,
     string? Comments);
+
+public record TeacherDto(string Id, string FullName, string Email, string Role, Guid? AcademicTrackId);

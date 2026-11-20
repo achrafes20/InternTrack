@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Card, Input, Text, BusyIndicator, Title, Tag } from '@ui5/webcomponents-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -8,10 +8,14 @@ import {
   faCube, faCalendar
 } from '@fortawesome/free-solid-svg-icons';
 import { apiClient } from '../../api/client';
-import { AuditLogDto } from '../../types';
+import { AuditLogDto, PaginatedList } from '../../types';
 
 const getActionStyle = (action: string): { borderColor: string; bg: string; tagScheme: string; label: string } => {
   const a = (action || '').toLowerCase();
+  // Actions enregistrées par le journal : Added / Modified / Deleted (états EF Core).
+  if (a === 'added') return { borderColor: '#107e3e', bg: '#f0fdf4', tagScheme: '8', label: 'CRÉATION' };
+  if (a === 'modified') return { borderColor: '#f5a623', bg: '#fffbeb', tagScheme: '6', label: 'MODIFICATION' };
+  if (a === 'deleted') return { borderColor: '#e53935', bg: '#fff5f5', tagScheme: '2', label: 'SUPPRESSION' };
   if (a.includes('create') || a.includes('insert') || a.includes('propose'))
     return { borderColor: '#107e3e', bg: '#f0fdf4', tagScheme: '8', label: 'CRÉATION' };
   if (a.includes('approve') || a.includes('validate') || a.includes('valide') || a.includes('start'))
@@ -34,28 +38,33 @@ export const AuditPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const { data: response, isLoading } = useQuery({
-    queryKey: ['audit-logs'],
-    queryFn: async () => { const res = await apiClient.get('/audit'); return res.data; }
+  // Filtres et pagination exécutés côté serveur : l'ensemble du journal est consultable,
+  // pas seulement la première page. Les saisies texte sont différées pour limiter les requêtes.
+  const deferredAction = useDeferredValue(filterAction);
+  const deferredEntity = useDeferredValue(filterEntity);
+  const deferredUser = useDeferredValue(filterUser);
+
+  const params = useMemo(() => ({
+    action: deferredAction || undefined,
+    entityName: deferredEntity || undefined,
+    user: deferredUser || undefined,
+    from: dateFrom ? `${dateFrom}T00:00:00Z` : undefined,
+    to: dateTo ? `${dateTo}T23:59:59Z` : undefined,
+    pageNumber: page,
+    pageSize,
+  }), [deferredAction, deferredEntity, deferredUser, dateFrom, dateTo, page]);
+
+  const { data: response, isLoading } = useQuery<PaginatedList<AuditLogDto>>({
+    queryKey: ['audit-logs', params],
+    queryFn: async () => (await apiClient.get('/audit', { params })).data,
+    placeholderData: keepPreviousData,
   });
 
-  const logs: AuditLogDto[] = Array.isArray(response)
-    ? response : Array.isArray(response?.items) ? response.items : [];
+  useEffect(() => { setPage(1); }, [deferredAction, deferredEntity, deferredUser, dateFrom, dateTo]);
 
-  const filtered = useMemo(() => {
-    return logs.filter(l => {
-      const matchAction = !filterAction || (l.action && l.action.toLowerCase().includes(filterAction.toLowerCase()));
-      const matchEntity = !filterEntity || (l.entityName && l.entityName.toLowerCase().includes(filterEntity.toLowerCase()));
-      const matchUser = !filterUser || ((l.userEmail || l.userId || '').toLowerCase().includes(filterUser.toLowerCase()));
-      const ts = l.timestamp ? new Date(l.timestamp) : null;
-      const matchFrom = !dateFrom || (ts && ts >= new Date(dateFrom));
-      const matchTo = !dateTo || (ts && ts <= new Date(dateTo + 'T23:59:59'));
-      return matchAction && matchEntity && matchUser && matchFrom && matchTo;
-    });
-  }, [logs, filterAction, filterEntity, filterUser, dateFrom, dateTo]);
-
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const paged: AuditLogDto[] = response?.items ?? [];
+  const totalPages = response?.totalPages ?? 0;
+  const totalCount = response?.totalCount ?? 0;
   const hasFilters = filterAction || filterEntity || filterUser || dateFrom || dateTo;
 
   const resetFilters = () => {
@@ -82,11 +91,11 @@ export const AuditPage: React.FC = () => {
         <div className="flex gap-3 flex-wrap">
           <span className="bg-white/15 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
             <FontAwesomeIcon icon={faDatabase} />
-            {logs.length} événements totaux
+            {totalCount} événement(s) correspondant(s)
           </span>
           <span className="bg-white/15 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
             <FontAwesomeIcon icon={faFilter} />
-            {filtered.length} affichés
+            {paged.length} sur cette page
           </span>
         </div>
       </div>
@@ -183,7 +192,7 @@ export const AuditPage: React.FC = () => {
       {/* Log entries */}
       {isLoading ? (
         <div className="flex justify-center py-16"><BusyIndicator active /></div>
-      ) : filtered.length === 0 ? (
+      ) : totalCount === 0 ? (
         <div className="text-center py-16 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300">
           <FontAwesomeIcon icon={faSearch} className="text-5xl text-gray-300 mb-3" />
           <Title level="H4">Aucun événement trouvé</Title>
@@ -245,7 +254,7 @@ export const AuditPage: React.FC = () => {
             <FontAwesomeIcon icon={faChevronLeft} /> Précédent
           </button>
           <span className="text-sm text-gray-500">
-            Page {page} / {totalPages} ({filtered.length} résultats)
+            Page {page} / {totalPages} ({totalCount} résultats)
           </span>
           <button
             disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}

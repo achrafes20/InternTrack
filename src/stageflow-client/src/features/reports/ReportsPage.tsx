@@ -28,9 +28,10 @@ export const ReportsPage: React.FC = () => {
   const [selectedReport, setSelectedReport] = useState<ProgressReportDto | null>(null);
   const [selectedInternshipId, setSelectedInternshipId] = useState<string>('');
   const [weekNumber, setWeekNumber] = useState(1);
-  const [content, setContent] = useState('');
-  const [tasksCompleted, setTasksCompleted] = useState('');
-  const [tasksPlanned, setTasksPlanned] = useState('');
+  const [reportTitle, setReportTitle] = useState('');
+  const [activities, setActivities] = useState('');
+  const [skills, setSkills] = useState('');
+  const [nextGoals, setNextGoals] = useState('');
   const [difficulties, setDifficulties] = useState('');
   const [commentText, setCommentText] = useState('');
   const [aiSummary, setAiSummary] = useState('');
@@ -66,13 +67,14 @@ export const ReportsPage: React.FC = () => {
       setSubmitError('');
       await apiClient.post('/reports', {
         internshipId: activeInternship.id, weekNumber: Number(weekNumber),
-        content, tasksCompleted, tasksPlanned, difficultiesEncountered: difficulties
+        title: reportTitle, activitiesPerformed: activities, skillsAcquired: skills,
+        difficultiesEncountered: difficulties, nextWeekGoals: nextGoals
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports'] });
-      setOpenSubmitDialog(false); setContent(''); setTasksCompleted('');
-      setTasksPlanned(''); setDifficulties(''); setSubmitError('');
+      setOpenSubmitDialog(false); setReportTitle(''); setActivities(''); setSkills('');
+      setNextGoals(''); setDifficulties(''); setSubmitError('');
     },
     onError: (err: any) => { setSubmitError(err.response?.data?.detail || 'Erreur lors du dépôt du rapport.'); }
   });
@@ -192,7 +194,7 @@ export const ReportsPage: React.FC = () => {
 
           {reports.map((r) => {
             const isExpanded = !!expandedCards[r.id];
-            const taskText = r.tasksCompleted || (r as any).activitiesPerformed || '';
+            const taskText = r.activitiesPerformed || '';
             const commentsCount = r.comments?.length || 0;
             const isValidated = r.status === 'Valide';
 
@@ -207,14 +209,14 @@ export const ReportsPage: React.FC = () => {
                         <FontAwesomeIcon icon={faCalendarDays} className="text-blue-500" />
                         Semaine {r.weekNumber}
                         <span className="text-sm font-normal text-gray-500 ml-1">
-                          — {formatDate(r.submissionDate || r.createdAt)}
+                          — {formatDate(r.createdAt)}
                         </span>
                       </div>
                       {isSupervisorOrHead && (
                         <div className="mt-0.5 text-xs text-gray-500">
                           <FontAwesomeIcon icon={faUser} className="mr-1" />
-                          <span className="font-semibold">{(r as any).studentName || 'Étudiant'}</span>
-                          {(r as any).internshipTitle && <span className="ml-1 text-gray-400">· {(r as any).internshipTitle}</span>}
+                          <span className="font-semibold">{r.studentName || 'Élève ingénieur'}</span>
+                          {r.internshipTitle && <span className="ml-1 text-gray-400">· {r.internshipTitle}</span>}
                         </div>
                       )}
                     </div>
@@ -246,9 +248,13 @@ export const ReportsPage: React.FC = () => {
                         <div className="bg-green-50 rounded-lg p-3 text-sm whitespace-pre-wrap">{taskText || '—'}</div>
                       </div>
                       <div>
+                        <div className="text-xs font-semibold text-gray-500 mb-1">Compétences acquises</div>
+                        <div className="bg-purple-50 rounded-lg p-3 text-sm whitespace-pre-wrap">{r.skillsAcquired || '—'}</div>
+                      </div>
+                      <div>
                         <div className="text-xs font-semibold text-gray-500 mb-1">Objectifs semaine suivante</div>
                         <div className="bg-blue-50 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                          {r.tasksPlanned || (r as any).plannedActivities || '—'}
+                          {r.nextWeekGoals || '—'}
                         </div>
                       </div>
                       <div>
@@ -256,7 +262,7 @@ export const ReportsPage: React.FC = () => {
                           <FontAwesomeIcon icon={faTriangleExclamation} className="mr-1 text-amber-500" /> Difficultés rencontrées
                         </div>
                         <div className="bg-amber-50 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                          {r.difficultiesEncountered || (r as any).difficulties || '—'}
+                          {r.difficultiesEncountered || '—'}
                         </div>
                       </div>
                       {commentsCount > 0 && (
@@ -271,7 +277,7 @@ export const ReportsPage: React.FC = () => {
                                   {c.authorName || c.userName || 'Encadrant'}
                                   <span className="font-normal text-gray-400 ml-1 text-xs">· {formatDate(c.createdAt)}</span>
                                 </div>
-                                <div className="text-gray-600">{c.content || c.text}</div>
+                                <div className="text-gray-600">{c.content}</div>
                               </div>
                             ))}
                           </div>
@@ -321,7 +327,7 @@ export const ReportsPage: React.FC = () => {
             <>
               <Button design="Transparent" onClick={() => setOpenSubmitDialog(false)}>Annuler</Button>
               <Button design="Emphasized"
-                disabled={(!content && !tasksCompleted) || submitReportMutation.isPending}
+                disabled={!activities.trim() || submitReportMutation.isPending}
                 onClick={() => submitReportMutation.mutate()}
               >
                 {submitReportMutation.isPending ? 'Enregistrement...' : 'Déposer le rapport'}
@@ -341,17 +347,22 @@ export const ReportsPage: React.FC = () => {
           </div>
           <div>
             <label className="block mb-1 font-semibold text-sm">Titre du rapport (Optionnel) :</label>
-            <Input value={content} onInput={(e: any) => setContent(e.target.value)}
+            <Input value={reportTitle} onInput={(e: any) => setReportTitle(e.target.value)}
               placeholder="Ex: Immersion et prise en main de l'architecture" style={{ width: '100%' }} />
           </div>
           <div>
-            <label className="block mb-1 font-semibold text-sm">Activités &amp; Tâches accomplies :</label>
-            <TextArea rows={3} value={tasksCompleted} onInput={(e: any) => setTasksCompleted(e.target.value)}
+            <label className="block mb-1 font-semibold text-sm">Activités &amp; Tâches accomplies (obligatoire) :</label>
+            <TextArea rows={3} value={activities} onInput={(e: any) => setActivities(e.target.value)}
               placeholder="Description des réalisations techniques, tickets résolus..." style={{ width: '100%' }} />
           </div>
           <div>
+            <label className="block mb-1 font-semibold text-sm">Compétences acquises :</label>
+            <TextArea rows={2} value={skills} onInput={(e: any) => setSkills(e.target.value)}
+              placeholder="Technologies, méthodes, savoir-être..." style={{ width: '100%' }} />
+          </div>
+          <div>
             <label className="block mb-1 font-semibold text-sm">Objectifs prévus (semaine suivante) :</label>
-            <TextArea rows={2} value={tasksPlanned} onInput={(e: any) => setTasksPlanned(e.target.value)}
+            <TextArea rows={2} value={nextGoals} onInput={(e: any) => setNextGoals(e.target.value)}
               placeholder="Livrables et étapes prévues..." style={{ width: '100%' }} />
           </div>
           <div>

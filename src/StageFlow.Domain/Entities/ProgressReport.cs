@@ -64,7 +64,9 @@ public class ProgressReport : BaseAuditableEntity
 
     public void SetAiSummary(string summary)
     {
-        AiSummary = summary ?? throw new ArgumentNullException(nameof(summary));
+        if (summary is null) throw new ArgumentNullException(nameof(summary));
+        // Texte produit par un service externe : borné à la taille de la colonne.
+        AiSummary = FieldLimits.Truncate(summary, FieldLimits.AiSummary);
     }
 
     public void MarkAsValidated()

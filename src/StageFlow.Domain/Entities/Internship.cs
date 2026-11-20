@@ -69,7 +69,7 @@ public class Internship : BaseAuditableEntity
         Status = InternshipStatus.Brouillon;
     }
 
-    public void UpdateDraft(
+    public Result UpdateDraft(
         string title,
         string subjectDescription,
         DateTime startDate,
@@ -77,14 +77,24 @@ public class Internship : BaseAuditableEntity
         Guid companyId,
         string companySupervisorName,
         string companySupervisorEmail,
-        string? companySupervisorPhone)
+        string? companySupervisorPhone,
+        string currentUserId)
     {
+        if (currentUserId != StudentId)
+            return Result.Failure("Seul l'étudiant propriétaire peut modifier ce dossier.");
+
         if (Status != InternshipStatus.Brouillon)
-            throw new InvalidOperationException("Seul un dossier à l'état Brouillon peut être modifié.");
+            return Result.Failure("Seul un dossier à l'état Brouillon peut être modifié.");
+
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(subjectDescription))
+            return Result.Failure("Le titre et la description du sujet sont obligatoires.");
+
+        if (string.IsNullOrWhiteSpace(companySupervisorName) || string.IsNullOrWhiteSpace(companySupervisorEmail))
+            return Result.Failure("Le nom et l'email du tuteur entreprise sont obligatoires.");
 
         var validation = DateRange.Validate(startDate, endDate);
         if (!validation.IsValid)
-            throw new ArgumentException(validation.Error);
+            return Result.Failure(validation.Error!);
 
         Title = title;
         SubjectDescription = subjectDescription;
@@ -93,6 +103,7 @@ public class Internship : BaseAuditableEntity
         CompanySupervisorName = companySupervisorName;
         CompanySupervisorEmail = companySupervisorEmail;
         CompanySupervisorPhone = companySupervisorPhone;
+        return Result.Success();
     }
 
     public void AssignAcademicSupervisor(string academicSupervisorId)
@@ -101,6 +112,24 @@ public class Internship : BaseAuditableEntity
     }
 
     #region State Machine Workflow
+
+    /// <summary>
+    /// Après un refus, l'étudiant propriétaire remet son dossier en brouillon pour le corriger
+    /// puis le soumettre à nouveau. Le motif de refus reste visible jusqu'à la prochaine validation.
+    /// </summary>
+    public Result ReopenAsDraft(string currentUserId)
+    {
+        if (currentUserId != StudentId)
+            return Result.Failure("Seul l'étudiant propriétaire peut retravailler ce dossier.");
+
+        if (Status != InternshipStatus.Refuse)
+            return Result.Failure($"Seul un dossier refusé peut être remis en brouillon (Statut actuel : {Status}).");
+
+        var prev = Status;
+        Status = InternshipStatus.Brouillon;
+        AddDomainEvent(new InternshipStatusChangedEvent(Id, prev, Status, currentUserId, DateTime.UtcNow));
+        return Result.Success();
+    }
 
     public Result SubmitForApproval(string currentUserId)
     {

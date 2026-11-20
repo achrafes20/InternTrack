@@ -6,12 +6,14 @@ using Microsoft.AspNetCore.Mvc;
 [Route("api/v1/[controller]")]
 public abstract class ApiControllerBase : ControllerBase
 {
+    /// <summary>
+    /// IP du client. Elle est déjà corrigée par le middleware ForwardedHeaders lorsque la requête
+    /// provient d'un proxy de confiance ; l'en-tête X-Forwarded-For brut n'est jamais lu ici (falsifiable).
+    /// </summary>
     protected string? GetIpAddress()
     {
-        if (Request.Headers.TryGetValue("X-Forwarded-For", out var forwardedHeader))
-            return forwardedHeader.FirstOrDefault();
-
-        return HttpContext.Connection.RemoteIpAddress?.MapToIPv4().ToString();
+        var address = HttpContext.Connection.RemoteIpAddress;
+        if (address == null) return null;
+        return address.IsIPv4MappedToIPv6 ? address.MapToIPv4().ToString() : address.ToString();
     }
 }
-

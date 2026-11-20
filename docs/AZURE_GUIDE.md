@@ -43,6 +43,14 @@ az postgres flexible-server firewall-rule create \
   --start-ip-address 0.0.0.0 \
   --end-ip-address 0.0.0.0
 
+# Autoriser l'extension btree_gist (requise par la contrainte d'exclusion des soutenances).
+# Sans cette autorisation, la migration AddConcurrencyAndDefenseSlotConstraint échoue au démarrage.
+az postgres flexible-server parameter set \
+  --resource-group rg-stageflow-prod \
+  --server-name psql-stageflow-prod \
+  --name azure.extensions \
+  --value BTREE_GIST
+
 # Créer la base de données applicative
 az postgres flexible-server db create \
   --resource-group rg-stageflow-prod \
@@ -78,11 +86,23 @@ az webapp config appsettings set \
     JwtSettings__Secret="YourVeryLongAndSecureSecretKeyGeneratedForProduction2026!" \
     JwtSettings__Issuer="StageFlowEnsa" \
     JwtSettings__Audience="StageFlowClient" \
-    JwtSettings__AccessTokenExpirationMinutes="30" \
+    JwtSettings__AccessTokenExpirationMinutes="15" \
     JwtSettings__RefreshTokenExpirationDays="7" \
-    AppSettings__FrontendBaseUrl="https://agreeable-beach-xxx.azurestaticapps.net" \
-    GeminiSettings__ApiKey="AIzaSyYourProductionGeminiApiKeyHere"
+    AppConfig__FrontendBaseUrl="https://agreeable-beach-xxx.azurestaticapps.net" \
+    Cors__AllowedOrigins__0="https://agreeable-beach-xxx.azurestaticapps.net" \
+    Auth__CrossSiteRefreshCookie="true" \
+    Database__AutoMigrate="true" \
+    Database__SeedDemoData="false" \
+    Gemini__ApiKey="<clé API Gemini>" \
+    Gemini__Model="gemini-2.5-flash"
 ```
+
+> **Pourquoi ces réglages ?**
+> - `Cors__AllowedOrigins__0` : le front (Static Web Apps) et l'API (App Service) sont sur deux domaines différents.
+> - `Auth__CrossSiteRefreshCookie=true` : le cookie de refresh doit alors être `SameSite=None; Secure`, sinon le navigateur ne l'envoie pas et la session est perdue à chaque rechargement.
+> - `Database__AutoMigrate=true` : applique les migrations au démarrage (désactivé par défaut en production). Vous pouvez à la place exécuter `dotnet ef database update` depuis la CI.
+> - App Service Linux transmet déjà l'IP réelle du client à ASP.NET Core ; aucun réglage `ReverseProxy__*` n'est nécessaire.
+> - Utilisez des secrets générés (`openssl rand -base64 48` pour `JwtSettings__Secret`) et, idéalement, des références Key Vault.
 
 ### Étape 2.5 : Création de l'Azure Static Web App pour le Frontend
 ```bash
@@ -91,7 +111,7 @@ az staticwebapp create \
   --resource-group rg-stageflow-prod \
   --source https://github.com/<your-username>/StageFlow \
   --location "westeurope" \
-  --branch master \
+  --branch main \
   --app-location "/src/stageflow-client" \
   --output-location "dist"
 ```
@@ -106,4 +126,8 @@ Dans votre dépôt GitHub, allez dans **Settings > Secrets and variables > Actio
 2. `AZURE_WEBAPP_PUBLISH_PROFILE` : Téléchargé depuis le portail Azure sur la page de votre Web App (*Get publish profile*).
 3. `AZURE_STATIC_WEB_APPS_API_TOKEN` : Obtenu lors de la création de la Static Web App (*Manage deployment token*).
 
-Chaque push sur la branche `master` déclenchera automatiquement le build et le déploiement continu sur Azure.
+Dans l'onglet **Variables** (et non *Secrets*), ajoutez :
+
+4. `API_BASE_URL` : URL publique de l'API, par exemple `https://app-stageflow-api.azurewebsites.net`. Elle est injectée au build du front (`VITE_API_BASE_URL`) ; sans elle, le front appellerait `/api` sur son propre domaine, où aucune API n'existe.
+
+Chaque push sur la branche `main` exécute les tests, puis déploie l'API et le front (le workflow peut aussi être lancé manuellement).

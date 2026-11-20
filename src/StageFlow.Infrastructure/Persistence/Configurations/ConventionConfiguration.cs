@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 
 namespace StageFlow.Infrastructure.Persistence.Configurations;
@@ -13,14 +14,14 @@ public class ConventionConfiguration : IEntityTypeConfiguration<Convention>
         builder.HasKey(c => c.Id);
 
         builder.Property(c => c.ConventionNumber)
-            .HasMaxLength(50)
+            .HasMaxLength(FieldLimits.ConventionNumber)
             .IsRequired();
 
         builder.HasIndex(c => c.ConventionNumber)
             .IsUnique();
 
         builder.Property(c => c.VerificationToken)
-            .HasMaxLength(64)
+            .HasMaxLength(FieldLimits.VerificationToken)
             .IsRequired();
 
         builder.HasIndex(c => c.VerificationToken)

@@ -20,3 +20,21 @@ Ce document consigne les décisions techniques et de modélisation prises de man
 - **Contexte** : Le QR code apposé sur la convention PDF doit permettre de certifier le document publiquement sans dépendance dure à une URL codée en dur.
 - **Décision** : L'URL de base publique (`FrontendBaseUrl`) est injectée via les options de configuration. La convention génère un jeton cryptographique aléatoire unique (`VerificationToken`) sans données identifiantes directes, résolu par un endpoint public `GET /api/v1/conventions/verify/{token}`.
 
+
+### ADR 005 : Accès concurrents
+- **Contexte** : Plusieurs responsables peuvent agir en même temps sur les mêmes dossiers, et l'API peut tourner sur plusieurs instances. Une vérification applicative suivie d'une écriture (« vérifier puis écrire ») ne suffit pas à empêcher les doublons.
+- **Décision** :
+  1. Concurrence optimiste sur toutes les entités métier via la colonne système PostgreSQL `xmin` (aucune colonne ajoutée). Un conflit renvoie HTTP 409.
+  2. La planification des soutenances s'exécute dans une transaction protégée par `pg_advisory_xact_lock`. Ce verrou couvre aussi les conflits de jury, qui portent sur plusieurs lignes et ne sont pas exprimables par une contrainte.
+  3. Une contrainte d'exclusion `btree_gist` sur `(lower(Classroom), tstzrange(ScheduledAt, EndsAt))` garantit au niveau base qu'une salle n'est jamais réservée deux fois. `EndsAt` est persisté parce que `timestamptz + interval` n'est pas immuable, donc inutilisable dans un index.
+- **Conséquence** : l'extension `btree_gist` doit être disponible (incluse dans l'image Docker officielle ; à autoriser explicitement sur Azure Flexible Server).
+
+### ADR 006 : Refresh token, plusieurs onglets et verrouillage de compte
+- **Contexte** : la rotation stricte du refresh token prenait deux onglets qui rafraîchissent en même temps pour un vol de token, et révoquait toutes les sessions. Le rate limiting par IP ne protégeait pas contre une attaque répartie.
+- **Décision** :
+  - Côté client, les rafraîchissements sont sérialisés entre onglets (Web Locks API).
+  - Côté serveur, un token remplacé reste accepté pendant 30 s si son remplaçant est toujours actif. Un rafraîchissement concurrent qui perd la course (conflit `xmin`) est rejoué une fois.
+  - Le lockout d'ASP.NET Identity est activé : 5 échecs entraînent 15 min de verrouillage. Le message d'échec est le même dans tous les cas, et l'administrateur peut déverrouiller un compte.
+
+### ADR 007 : Validation des entrées
+- **Décision** : FluentValidation, exécuté par un filtre MVC global. Les longueurs maximales proviennent de `FieldLimits` (domaine), également utilisé par la configuration EF : la validation et le schéma ne peuvent pas diverger. Les textes produits par le système (résumé IA) sont tronqués à la taille de leur colonne.

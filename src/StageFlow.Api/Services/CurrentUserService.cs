@@ -14,6 +14,7 @@ public class CurrentUserService : ICurrentUserService
 
     public string? UserId => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
     public string? UserEmail => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.Email);
+    public string? UserFullName => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.Name);
     public string? UserRole => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.Role);
     public string? AcademicTrackId => _httpContextAccessor.HttpContext?.User?.FindFirstValue("AcademicTrackId");
     public bool IsAuthenticated => _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;

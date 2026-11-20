@@ -8,6 +8,8 @@ using StageFlow.Domain.Enums;
 
 namespace StageFlow.Api.Controllers.v1;
 
+public record AssignSupervisorRequest(string SupervisorId);
+
 [Authorize]
 public class InternshipsController : ApiControllerBase
 {
@@ -46,6 +48,9 @@ public class InternshipsController : ApiControllerBase
         }
         else if (_accessControl.IsDepartmentHead)
         {
+            if (!_accessControl.AcademicTrackId.HasValue)
+                return Ok(Array.Empty<InternshipDto>());
+
             effectiveTrackId = _accessControl.AcademicTrackId;
         }
         else if (!_accessControl.IsAdmin)
@@ -74,8 +79,11 @@ public class InternshipsController : ApiControllerBase
     [Authorize(Policy = "RequireStudentRole")]
     public async Task<IActionResult> ProposeInternship([FromBody] ProposeInternshipCommand command, CancellationToken cancellationToken)
     {
-        // Un étudiant ne peut proposer un stage que dans sa propre filière.
-        if (_accessControl.AcademicTrackId.HasValue && command.AcademicTrackId != _accessControl.AcademicTrackId.Value)
+        // Un étudiant doit être rattaché à une filière et ne peut proposer un stage que dans celle-ci.
+        if (!_accessControl.AcademicTrackId.HasValue)
+            return BadRequest(new ProblemDetails { Title = "Compte incomplet", Detail = "Votre compte n'est rattaché à aucune filière. Contactez l'administration.", Status = 400 });
+
+        if (command.AcademicTrackId != _accessControl.AcademicTrackId.Value)
             return Forbid();
 
         var studentId = _accessControl.UserId!;
@@ -87,6 +95,20 @@ public class InternshipsController : ApiControllerBase
         return CreatedAtAction(nameof(GetInternshipById), new { id = result.Value!.Id }, result.Value);
     }
 
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "RequireStudentRole")]
+    public async Task<IActionResult> UpdateDraft(Guid id, [FromBody] UpdateInternshipDraftCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanAccessInternshipAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _internshipService.UpdateDraftAsync(id, command, _accessControl.UserId!, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Modification impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
     [HttpPost("{id:guid}/submit")]
     [Authorize(Policy = "RequireStudentRole")]
     public async Task<IActionResult> SubmitInternship(Guid id, CancellationToken cancellationToken)
@@ -94,11 +116,24 @@ public class InternshipsController : ApiControllerBase
         if (!await _accessControl.CanAccessInternshipAsync(id, cancellationToken))
             return Forbid();
 
-        var studentId = _accessControl.UserId!;
-        var result = await _internshipService.SubmitAsync(id, studentId, cancellationToken);
+        var result = await _internshipService.SubmitAsync(id, _accessControl.UserId!, cancellationToken);
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Soumission impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/reopen")]
+    [Authorize(Policy = "RequireStudentRole")]
+    public async Task<IActionResult> ReopenInternship(Guid id, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanAccessInternshipAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _internshipService.ReopenAsync(id, _accessControl.UserId!, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Réouverture impossible", Detail = result.Error, Status = 400 });
 
         return NoContent();
     }
@@ -110,8 +145,7 @@ public class InternshipsController : ApiControllerBase
         if (!await _accessControl.CanManageInternshipAsync(id, cancellationToken))
             return Forbid();
 
-        var currentUserId = _accessControl.UserId!;
-        var result = await _internshipService.ApproveAsync(id, currentUserId, cancellationToken);
+        var result = await _internshipService.ApproveAsync(id, _accessControl.UserId!, cancellationToken);
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Validation impossible", Detail = result.Error, Status = 400 });
@@ -126,8 +160,7 @@ public class InternshipsController : ApiControllerBase
         if (!await _accessControl.CanManageInternshipAsync(id, cancellationToken))
             return Forbid();
 
-        var currentUserId = _accessControl.UserId!;
-        var result = await _internshipService.RejectAsync(id, currentUserId, command.RejectionReason, cancellationToken);
+        var result = await _internshipService.RejectAsync(id, _accessControl.UserId!, command.RejectionReason, cancellationToken);
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Refus impossible", Detail = result.Error, Status = 400 });
@@ -142,8 +175,7 @@ public class InternshipsController : ApiControllerBase
         if (!await _accessControl.CanManageInternshipAsync(id, cancellationToken))
             return Forbid();
 
-        var currentUserId = _accessControl.UserId!;
-        var result = await _internshipService.StartInternshipAsync(id, currentUserId, cancellationToken);
+        var result = await _internshipService.StartInternshipAsync(id, _accessControl.UserId!, cancellationToken);
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Démarrage impossible", Detail = result.Error, Status = 400 });
@@ -153,21 +185,21 @@ public class InternshipsController : ApiControllerBase
 
     [HttpPost("{id:guid}/assign-supervisor")]
     [Authorize(Policy = "RequireDepartmentHeadRole")]
-    public async Task<IActionResult> AssignSupervisor(Guid id, [FromQuery] string supervisorId, CancellationToken cancellationToken)
+    public async Task<IActionResult> AssignSupervisor(Guid id, [FromBody] AssignSupervisorRequest request, CancellationToken cancellationToken)
     {
         if (!await _accessControl.CanManageInternshipAsync(id, cancellationToken))
             return Forbid();
 
-        if (string.IsNullOrWhiteSpace(supervisorId))
+        if (string.IsNullOrWhiteSpace(request.SupervisorId))
             return BadRequest(new ProblemDetails { Title = "Paramètre manquant", Detail = "L'identifiant de l'encadrant est obligatoire.", Status = 400 });
 
-        var isSupervisor = await _identityService.IsUserInRoleAsync(supervisorId, UserRole.Encadrant, cancellationToken)
-            || await _identityService.IsUserInRoleAsync(supervisorId, UserRole.ResponsableFiliere, cancellationToken);
+        var isSupervisor = await _identityService.IsUserInRoleAsync(request.SupervisorId, UserRole.Encadrant, cancellationToken)
+            || await _identityService.IsUserInRoleAsync(request.SupervisorId, UserRole.ResponsableFiliere, cancellationToken);
 
         if (!isSupervisor)
             return BadRequest(new ProblemDetails { Title = "Encadrant invalide", Detail = "L'utilisateur ciblé doit avoir le rôle Encadrant ou Responsable de filière.", Status = 400 });
 
-        var result = await _internshipService.AssignSupervisorAsync(id, supervisorId, cancellationToken);
+        var result = await _internshipService.AssignSupervisorAsync(id, request.SupervisorId, cancellationToken);
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Affectation impossible", Detail = result.Error, Status = 400 });

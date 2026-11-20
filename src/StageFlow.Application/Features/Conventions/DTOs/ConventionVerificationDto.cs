@@ -1,3 +1,5 @@
+using StageFlow.Domain.Entities;
+
 namespace StageFlow.Application.Features.Conventions.DTOs;
 
 public record ConventionVerificationDto(
@@ -8,6 +10,10 @@ public record ConventionVerificationDto(
     DateTime StartDate,
     DateTime EndDate,
     bool IsAuthentic,
+    bool IsSignedByStudent,
+    bool IsSignedByCompany,
+    bool IsSignedBySchool,
     bool IsFullySigned,
     DateTime? SignedAt);
 
+public record SignConventionCommand(ConventionParty Party);

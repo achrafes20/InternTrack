@@ -33,7 +33,11 @@ $allInternships = Invoke-RestMethod -Uri "$base/internships" -Headers $respHeade
 Write-Host " [OK] Stages visibles par le responsable:" $allInternships.Count
 
 # Test conflict check
-$conflictBody = '{"defenseDate":"2026-11-20T10:00:00Z","classroom":"Salle B204","juryTeacherNames":["Prof Tazi"]}'
+$teachers = Invoke-RestMethod -Uri "$base/teachers" -Headers $respHeaders -Method Get
+Write-Host " [OK] Enseignants disponibles pour un jury:" $teachers.Count
+$teacherIds = @($teachers | Select-Object -First 1 | ForEach-Object { $_.id })
+$scheduledAt = (Get-Date).ToUniversalTime().AddDays(30).ToString("yyyy-MM-ddTHH:00:00Z")
+$conflictBody = @{ scheduledAt = $scheduledAt; durationMinutes = 45; classroom = "Salle B204"; juryTeacherIds = $teacherIds } | ConvertTo-Json
 
 try {
     $conflict = Invoke-RestMethod -Uri "$base/defenses/check-conflict" -Headers $respHeaders -Method Post -Body $conflictBody -ContentType "application/json; charset=utf-8"
@@ -67,7 +71,7 @@ foreach ($i in $myInternships) {
 }
 
 # Download convention PDF for active internship
-$activeStage = $myInternships | Where-Object { $_.status -ge 2 } | Select-Object -First 1
+$activeStage = $myInternships | Where-Object { $_.convention } | Select-Object -First 1
 if ($activeStage) {
     Write-Host " [OK] Téléchargement convention PDF pour stage ID:" $activeStage.id
     $pdfBytes = Invoke-RestMethod -Uri ("$base/conventions/internship/{0}/pdf" -f $activeStage.id) -Headers $studentHeaders -Method Get
@@ -86,5 +90,5 @@ $offersCount = if ($offers.items) { $offers.items.Count } else { $offers.Count }
 Write-Host " [OK] Offres de stage disponibles:" $offersCount
 
 Write-Host "`n==========================================================="
-Write-Host " SUCCÈS TOTAL : TOUTES LES FONCTIONNALITÉS FONCTIONNENT À 100% !"
+Write-Host " Parcours de démonstration terminé sans erreur."
 Write-Host "===========================================================`n"

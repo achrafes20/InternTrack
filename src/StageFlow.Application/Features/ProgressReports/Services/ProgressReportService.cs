@@ -19,16 +19,19 @@ public interface IProgressReportService
 public class ProgressReportService : IProgressReportService
 {
     private readonly IApplicationDbContext _context;
+    private readonly IIdentityService _identityService;
 
-    public ProgressReportService(IApplicationDbContext context)
+    public ProgressReportService(IApplicationDbContext context, IIdentityService identityService)
     {
         _context = context;
+        _identityService = identityService;
     }
 
     public async Task<List<ProgressReportDto>> GetAllReportsAsync(string userId, string role, Guid? academicTrackId, CancellationToken cancellationToken)
     {
         var query = _context.ProgressReports
             .Include(r => r.Comments)
+            .Include(r => r.Internship)
             .AsNoTracking()
             .AsQueryable();
 
@@ -56,19 +59,34 @@ public class ProgressReportService : IProgressReportService
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return reports.Select(r => MapToDto(r)).ToList();
+        return await MapWithContextAsync(reports, cancellationToken);
     }
 
     public async Task<List<ProgressReportDto>> GetReportsByInternshipAsync(Guid internshipId, CancellationToken cancellationToken)
     {
         var reports = await _context.ProgressReports
             .Include(r => r.Comments)
+            .Include(r => r.Internship)
             .Where(r => r.InternshipId == internshipId)
             .OrderBy(r => r.WeekNumber)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        return reports.Select(r => MapToDto(r)).ToList();
+        return await MapWithContextAsync(reports, cancellationToken);
+    }
+
+    private async Task<List<ProgressReportDto>> MapWithContextAsync(List<ProgressReport> reports, CancellationToken cancellationToken)
+    {
+        var names = await _identityService.GetUserNamesAsync(
+            reports.Select(r => r.Internship.StudentId).Distinct(), cancellationToken);
+
+        return reports
+            .Select(r => MapToDto(r) with
+            {
+                InternshipTitle = r.Internship.Title,
+                StudentName = names.GetValueOrDefault(r.Internship.StudentId)
+            })
+            .ToList();
     }
 
     public async Task<Result<ProgressReportDto>> CreateReportAsync(Guid internshipId, CreateReportCommand command, string studentId, CancellationToken cancellationToken)
@@ -82,6 +100,12 @@ public class ProgressReportService : IProgressReportService
 
         if (internship.Status != InternshipStatus.EnCours && internship.Status != InternshipStatus.SoutenancePlanifiee && internship.Status != InternshipStatus.Valide)
             return Result<ProgressReportDto>.Failure($"Les rapports ne peuvent être déposés que pour un stage validé ou en cours (Statut : {internship.Status}).");
+
+        if (command.WeekNumber < 1 || command.WeekNumber > 60)
+            return Result<ProgressReportDto>.Failure("Le numéro de semaine doit être compris entre 1 et 60.");
+
+        if (string.IsNullOrWhiteSpace(command.ActivitiesPerformed))
+            return Result<ProgressReportDto>.Failure("La description des activités réalisées est obligatoire.");
 
         var existingReport = await _context.ProgressReports
             .AnyAsync(r => r.InternshipId == internshipId && r.WeekNumber == command.WeekNumber, cancellationToken);
@@ -129,6 +153,9 @@ public class ProgressReportService : IProgressReportService
         var report = await _context.ProgressReports.FindAsync(new object[] { reportId }, cancellationToken);
         if (report == null)
             return Result.Failure("Rapport introuvable.");
+
+        if (report.Status == ReportStatus.Valide)
+            return Result.Failure("Ce rapport est déjà validé.");
 
         report.MarkAsValidated();
         await _context.SaveChangesAsync(cancellationToken);

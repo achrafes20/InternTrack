@@ -9,11 +9,15 @@ public record LoginRequest(string Email, string Password);
 
 public class AuthController : ApiControllerBase
 {
-    private readonly IIdentityService _identityService;
+    public const string RefreshCookieName = "stageflow_refresh_token";
 
-    public AuthController(IIdentityService identityService)
+    private readonly IIdentityService _identityService;
+    private readonly IConfiguration _configuration;
+
+    public AuthController(IIdentityService identityService, IConfiguration configuration)
     {
         _identityService = identityService;
+        _configuration = configuration;
     }
 
     [HttpPost("login")]
@@ -42,9 +46,10 @@ public class AuthController : ApiControllerBase
 
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [EnableRateLimiting("refresh_limiter")]
     public async Task<IActionResult> RefreshToken(CancellationToken cancellationToken)
     {
-        var refreshToken = Request.Cookies["stageflow_refresh_token"];
+        var refreshToken = Request.Cookies[RefreshCookieName];
         if (string.IsNullOrEmpty(refreshToken))
             return Unauthorized(new ProblemDetails { Title = "Non autorisé", Detail = "Cookie de rafraîchissement absent.", Status = 401 });
 
@@ -70,7 +75,7 @@ public class AuthController : ApiControllerBase
     [Authorize]
     public async Task<IActionResult> Logout(CancellationToken cancellationToken)
     {
-        var refreshToken = Request.Cookies["stageflow_refresh_token"];
+        var refreshToken = Request.Cookies[RefreshCookieName];
         if (!string.IsNullOrEmpty(refreshToken))
         {
             await _identityService.RevokeTokenAsync(refreshToken, GetIpAddress(), cancellationToken);
@@ -80,31 +85,26 @@ public class AuthController : ApiControllerBase
         return NoContent();
     }
 
-    private void SetRefreshTokenCookie(string token, DateTime expires)
+    private CookieOptions BuildCookieOptions(DateTime? expires = null)
     {
-        var cookieOptions = new CookieOptions
+        // Front et API sur des domaines différents (ex. Azure Static Web Apps + App Service) :
+        // le cookie doit être SameSite=None, ce qui impose Secure (HTTPS).
+        var crossSite = _configuration.GetValue<bool>("Auth:CrossSiteRefreshCookie");
+
+        return new CookieOptions
         {
             HttpOnly = true,
             Expires = expires,
-            // Le cookie n'est marqué Secure qu'en HTTPS : en développement local (HTTP),
-            // le navigateur refuserait sinon de le stocker.
-            Secure = Request.IsHttps,
-            SameSite = SameSiteMode.Lax, // Permet les appels cross-port localhost en développement
+            // En développement local (HTTP), le navigateur refuserait un cookie Secure.
+            Secure = crossSite || Request.IsHttps,
+            SameSite = crossSite ? SameSiteMode.None : SameSiteMode.Lax,
             Path = "/api/v1/auth"
         };
-
-        Response.Cookies.Append("stageflow_refresh_token", token, cookieOptions);
     }
+
+    private void SetRefreshTokenCookie(string token, DateTime expires)
+        => Response.Cookies.Append(RefreshCookieName, token, BuildCookieOptions(expires));
 
     private void DeleteRefreshTokenCookie()
-    {
-        Response.Cookies.Delete("stageflow_refresh_token", new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = Request.IsHttps,
-            SameSite = SameSiteMode.Lax,
-            Path = "/api/v1/auth"
-        });
-    }
+        => Response.Cookies.Delete(RefreshCookieName, BuildCookieOptions());
 }
-
