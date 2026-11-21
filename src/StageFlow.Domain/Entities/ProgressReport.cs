@@ -44,7 +44,10 @@ public class ProgressReport : BaseAuditableEntity
         AddDomainEvent(new ProgressReportSubmittedEvent(Id, internshipId, weekNumber, DateTime.UtcNow));
     }
 
-    public void Update(
+    /// <summary>
+    /// Modification par l'élève tant que le rapport n'a pas été validé. Le résumé IA, devenu obsolète, est effacé.
+    /// </summary>
+    public Result Update(
         string title,
         string activitiesPerformed,
         string skillsAcquired,
@@ -52,14 +55,19 @@ public class ProgressReport : BaseAuditableEntity
         string nextWeekGoals)
     {
         if (Status == ReportStatus.Valide)
-            throw new InvalidOperationException("Un rapport déjà validé ne peut plus être modifié.");
+            return Result.Failure("Un rapport déjà validé par l'encadrant ne peut plus être modifié.");
 
-        Title = title;
+        if (string.IsNullOrWhiteSpace(activitiesPerformed))
+            return Result.Failure("La description des activités réalisées est obligatoire.");
+
+        Title = string.IsNullOrWhiteSpace(title) ? $"Rapport Semaine {WeekNumber}" : title;
         ActivitiesPerformed = activitiesPerformed;
-        SkillsAcquired = skillsAcquired;
-        DifficultiesEncountered = difficultiesEncountered;
-        NextWeekGoals = nextWeekGoals;
+        SkillsAcquired = skillsAcquired ?? string.Empty;
+        DifficultiesEncountered = difficultiesEncountered ?? string.Empty;
+        NextWeekGoals = nextWeekGoals ?? string.Empty;
+        AiSummary = null;
         Status = ReportStatus.ARelire;
+        return Result.Success();
     }
 
     public void SetAiSummary(string summary)

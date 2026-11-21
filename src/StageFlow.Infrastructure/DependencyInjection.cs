@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -16,6 +17,9 @@ using StageFlow.Infrastructure.Services.Background;
 using StageFlow.Infrastructure.Services.Email;
 using StageFlow.Infrastructure.Services.Pdf;
 using StageFlow.Infrastructure.Services.Qr;
+using StageFlow.Infrastructure.Services.Storage;
+using StageFlow.Infrastructure.Services.Time;
+using StageFlow.Application.Features.Internships;
 
 namespace StageFlow.Infrastructure;
 
@@ -80,6 +84,22 @@ public static class DependencyInjection
                 "Configurez-le via appsettings.Development.json, une variable d'environnement " +
                 "(JwtSettings__Secret) ou les user-secrets. Ne jamais committer de secret de production.");
         }
+
+        // Liens de réinitialisation de mot de passe valables 2 heures.
+        services.Configure<DataProtectionTokenProviderOptions>(options => options.TokenLifespan = TimeSpan.FromHours(2));
+
+        // Clés de protection des données (jetons de réinitialisation…) persistées hors du conteneur :
+        // sans cela, chaque redémarrage invaliderait les liens envoyés par e-mail.
+        var dataProtection = services.AddDataProtection().SetApplicationName("StageFlow");
+        var keysPath = configuration["DataProtection:KeysPath"];
+        if (!string.IsNullOrWhiteSpace(keysPath))
+        {
+            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+        }
+
+        services.AddSingleton<ITimeZoneService, TimeZoneService>();
+        services.AddSingleton<IFileStorage, LocalFileStorage>();
+        services.AddSingleton(InternshipPolicy.FromConfiguration(configuration));
 
         services.AddScoped<IIdentityService, IdentityService>();
         services.AddScoped<IPdfGenerator, QuestPdfGenerator>();

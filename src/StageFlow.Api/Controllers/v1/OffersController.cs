@@ -64,4 +64,46 @@ public class OffersController : ApiControllerBase
 
         return CreatedAtAction(nameof(GetOfferById), new { id = result.Value!.Id }, result.Value);
     }
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> UpdateOffer(Guid id, [FromBody] UpdateInternshipOfferCommand command, CancellationToken cancellationToken)
+    {
+        var scope = await CheckOfferScopeAsync(id, cancellationToken);
+        if (scope != null) return scope;
+
+        var result = await _offerService.UpdateOfferAsync(id, command, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Modification impossible", Detail = result.Error, Status = 400 });
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>Désactive (retire du catalogue) ou réactive une offre.</summary>
+    [HttpPut("{id:guid}/active")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> SetActive(Guid id, [FromBody] SetOfferActiveCommand command, CancellationToken cancellationToken)
+    {
+        var scope = await CheckOfferScopeAsync(id, cancellationToken);
+        if (scope != null) return scope;
+
+        var result = await _offerService.SetActiveAsync(id, command.IsActive, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Opération impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Un responsable ne gère que les offres de sa filière ; l'administrateur gère toutes les offres.</summary>
+    private async Task<IActionResult?> CheckOfferScopeAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var offer = await _offerService.GetOfferByIdAsync(id, cancellationToken);
+        if (offer.IsFailure)
+            return NotFound(new ProblemDetails { Title = "Non trouvé", Detail = offer.Error, Status = 404 });
+
+        if (_accessControl.IsDepartmentHead && _accessControl.AcademicTrackId != offer.Value!.AcademicTrackId)
+            return Forbid();
+
+        return null;
+    }
 }

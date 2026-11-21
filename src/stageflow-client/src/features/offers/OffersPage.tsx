@@ -11,7 +11,7 @@ import {
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { InternshipOffer, apiErrorMessage } from '../../types';
-import { CreateOfferDialog, CreateCompanyDialog } from './OfferManagementDialogs';
+import { CreateOfferDialog, CompaniesDialog } from './OfferManagementDialogs';
 
 const TRACK_COLORS: Record<string, string> = {
   GI: '#2563eb', GC: '#059669', GE: '#7c3aed',
@@ -32,6 +32,27 @@ export const OffersPage: React.FC = () => {
   const isAdmin = user?.role === 'Admin';
   const [openCreateOffer, setOpenCreateOffer] = useState(false);
   const [openCreateCompany, setOpenCreateCompany] = useState(false);
+  const [editingOffer, setEditingOffer] = useState<InternshipOffer | null>(null);
+  const [manageError, setManageError] = useState('');
+
+  // Un responsable gère les offres de sa filière ; l'administrateur toutes les offres.
+  const canManage = (o: InternshipOffer) => isAdmin || (isCoord && o.academicTrackId === user?.academicTrackId);
+  const isExpired = (o: InternshipOffer) => new Date(o.expirationDate) < new Date();
+
+  const offerState = (o: InternshipOffer) => !o.isActive
+    ? <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-xl text-xs font-semibold">Désactivée</span>
+    : isExpired(o)
+    ? <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-xl text-xs font-semibold">Expirée</span>
+    : <span className="px-2.5 py-1 bg-green-100 text-green-800 rounded-xl text-xs font-semibold"><FontAwesomeIcon icon={faCheck} className="mr-1" />Active</span>;
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      setManageError('');
+      await api.put(`/offers/${id}/active`, { isActive });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['offers'] }),
+    onError: (err: any) => setManageError(apiErrorMessage(err, "Impossible de modifier l'état de l'offre.")),
+  });
 
   const [selectedOffer, setSelectedOffer] = useState<InternshipOffer | null>(null);
   const [postulerTitle, setPostulerTitle] = useState('');
@@ -39,13 +60,14 @@ export const OffersPage: React.FC = () => {
   const [supervisorName, setSupervisorName] = useState('');
   const [supervisorEmail, setSupervisorEmail] = useState('');
   const [supervisorPhone, setSupervisorPhone] = useState('');
-  const [startDate, setStartDate] = useState('2026-03-01');
-  const [endDate, setEndDate] = useState('2026-08-31');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [applyError, setApplyError] = useState('');
 
   const { data, isLoading } = useQuery<{ items: InternshipOffer[]; totalCount: number }>({
-    queryKey: ['offers'],
-    queryFn: async () => { const res = await api.get('/offers', { params: { pageSize: 50 } }); return res.data; },
+    queryKey: ['offers', isCoord || isAdmin],
+    // Les gestionnaires voient aussi les offres désactivées ou expirées, pour pouvoir les réactiver.
+    queryFn: async () => (await api.get('/offers', { params: { pageSize: 100, includeClosed: isCoord || isAdmin } })).data,
   });
 
   const allOffers = data?.items || [];
@@ -81,6 +103,11 @@ export const OffersPage: React.FC = () => {
     setSelectedOffer(offer);
     setPostulerTitle(`Stage PFE – ${offer.title}`);
     setPostulerDesc(offer.description);
+    // Début dans une semaine, fin calée sur la durée annoncée par l'offre (contrôlée par le serveur).
+    const start = new Date(); start.setDate(start.getDate() + 7);
+    const end = new Date(start); end.setDate(end.getDate() + offer.durationInWeeks * 7);
+    setStartDate(start.toISOString().substring(0, 10));
+    setEndDate(end.toISOString().substring(0, 10));
     setApplyError('');
   };
 
@@ -111,7 +138,7 @@ export const OffersPage: React.FC = () => {
             {isAdmin && (
               <button onClick={() => setOpenCreateCompany(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 text-white rounded-lg font-semibold text-sm">
-                <FontAwesomeIcon icon={faBuilding} /> Ajouter une entreprise
+                <FontAwesomeIcon icon={faBuilding} /> Gérer les entreprises
               </button>
             )}
           </div>
@@ -119,7 +146,14 @@ export const OffersPage: React.FC = () => {
       </div>
 
       {openCreateOffer && <CreateOfferDialog onClose={() => setOpenCreateOffer(false)} />}
-      {openCreateCompany && <CreateCompanyDialog onClose={() => setOpenCreateCompany(false)} />}
+
+      {manageError && (
+        <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded text-sm text-red-700">
+          <FontAwesomeIcon icon={faTriangleExclamation} className="mr-2" />{manageError}
+        </div>
+      )}
+      {openCreateCompany && <CompaniesDialog onClose={() => setOpenCreateCompany(false)} />}
+      {editingOffer && <CreateOfferDialog offer={editingOffer} onClose={() => setEditingOffer(null)} />}
 
       {/* Filters */}
       <div className="bg-white rounded-2xl p-5 border border-gray-200/80 shadow-sm flex flex-col gap-3">
@@ -282,10 +316,21 @@ export const OffersPage: React.FC = () => {
                     >
                       Postuler <FontAwesomeIcon icon={faArrowRight} />
                     </button>
+                  ) : canManage(offer) ? (
+                    <div className="flex items-center gap-1.5">
+                      {offerState(offer)}
+                      <button onClick={() => setEditingOffer(offer)}
+                        className="px-2 py-1 border border-gray-300 hover:bg-gray-50 rounded-lg text-xs font-semibold text-gray-700">
+                        Modifier
+                      </button>
+                      <button onClick={() => toggleActiveMutation.mutate({ id: offer.id, isActive: !offer.isActive })}
+                        disabled={toggleActiveMutation.isPending}
+                        className="px-2 py-1 border border-gray-300 hover:bg-gray-50 rounded-lg text-xs font-semibold text-gray-700">
+                        {offer.isActive ? 'Désactiver' : 'Réactiver'}
+                      </button>
+                    </div>
                   ) : (
-                    <span className="px-2.5 py-1 bg-green-100 text-green-800 rounded-xl text-xs font-semibold">
-                      <FontAwesomeIcon icon={faCheck} className="mr-1" />Active
-                    </span>
+                    offerState(offer)
                   )}
                 </div>
               </div>

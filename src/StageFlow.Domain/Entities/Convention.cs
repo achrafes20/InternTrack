@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using StageFlow.Domain.Common;
+using StageFlow.Domain.Events;
 
 namespace StageFlow.Domain.Entities;
 
@@ -24,6 +25,25 @@ public class Convention : BaseAuditableEntity
     public bool IsSignedByCompany { get; private set; }
     public bool IsSignedBySchool { get; private set; }
     public DateTime? SignedAt { get; private set; }
+
+    /// <summary>Nom de la personne ayant signé pour l'entreprise et date de cette signature.</summary>
+    public string? CompanySignerName { get; private set; }
+    public DateTime? CompanySignedAt { get; private set; }
+
+    /// <summary>
+    /// Lien de signature envoyé à l'entreprise : seul le hash SHA-256 du jeton est conservé
+    /// (une fuite de la base ne permet pas de signer à la place de l'entreprise).
+    /// </summary>
+    public string? CompanySigningTokenHash { get; private set; }
+    public DateTime? CompanySigningTokenExpiresAt { get; private set; }
+
+    /// <summary>
+    /// Exemplaire de référence figé au moment de la dernière signature, et son empreinte SHA-256.
+    /// Toute personne peut recalculer l'empreinte d'un PDF reçu et la comparer à celle publiée
+    /// sur la page de vérification : la moindre modification du fichier est détectée.
+    /// </summary>
+    public string? SignedDocumentStorageKey { get; private set; }
+    public string? SignedDocumentSha256 { get; private set; }
 
     // Foreign Key 1-to-1
     public Guid InternshipId { get; private set; }
@@ -75,6 +95,72 @@ public class Convention : BaseAuditableEntity
         return Result.Success();
     }
 
+    /// <summary>Émet un nouveau lien de signature pour l'entreprise (invalide le précédent). Retourne le jeton brut.</summary>
+    public Result<string> IssueCompanySigningToken(DateTime utcNow, TimeSpan validity)
+    {
+        if (IsSignedByCompany)
+            return Result<string>.Failure("L'entreprise a déjà signé cette convention.");
+
+        var rawToken = SecureToken.Generate();
+        CompanySigningTokenHash = SecureToken.Hash(rawToken);
+        CompanySigningTokenExpiresAt = utcNow.Add(validity);
+        return Result<string>.Success(rawToken);
+    }
+
+    public bool IsCompanySigningTokenValid(string rawToken, DateTime utcNow)
+        => CompanySigningTokenHash != null
+           && CompanySigningTokenExpiresAt > utcNow
+           && SecureToken.Matches(CompanySigningTokenHash, rawToken);
+
+    /// <summary>Signature par l'entreprise via le lien reçu par e-mail (jeton à usage unique).</summary>
+    public Result SignByCompanyWithToken(string rawToken, string signerName, DateTime utcNow)
+    {
+        if (IsSignedByCompany)
+            return Result.Failure("L'entreprise a déjà signé cette convention.");
+
+        if (!IsCompanySigningTokenValid(rawToken, utcNow))
+            return Result.Failure("Ce lien de signature est invalide ou a expiré. Demandez un nouveau lien à l'école.");
+
+        return RecordCompanySignature(signerName, utcNow);
+    }
+
+    /// <summary>
+    /// Enregistre la signature de l'entreprise : soit via le lien, soit par l'école à réception de
+    /// l'exemplaire papier signé (dont le scan doit alors être déposé, contrôle fait par le service).
+    /// </summary>
+    public Result RecordCompanySignature(string signerName, DateTime utcNow)
+    {
+        if (string.IsNullOrWhiteSpace(signerName))
+            return Result.Failure("Le nom du signataire de l'entreprise est obligatoire.");
+
+        var result = Sign(ConventionParty.Company);
+        if (result.IsFailure)
+            return result;
+
+        CompanySignerName = FieldLimits.Truncate(signerName.Trim(), FieldLimits.PersonName);
+        CompanySignedAt = utcNow;
+        CompanySigningTokenHash = null;
+        CompanySigningTokenExpiresAt = null;
+        AddDomainEvent(new ConventionCompanySignedEvent(Id, InternshipId, CompanySignerName, DateTime.UtcNow));
+        return Result.Success();
+    }
+
+    /// <summary>Fige l'exemplaire signé (une seule fois) : il ne sera plus jamais régénéré.</summary>
+    public Result FreezeSignedDocument(string storageKey, string sha256)
+    {
+        if (!IsFullySigned)
+            return Result.Failure("Seule une convention signée par les trois parties peut être figée.");
+        if (SignedDocumentStorageKey != null)
+            return Result.Failure("L'exemplaire signé est déjà figé.");
+
+        SignedDocumentStorageKey = storageKey ?? throw new ArgumentNullException(nameof(storageKey));
+        SignedDocumentSha256 = sha256 ?? throw new ArgumentNullException(nameof(sha256));
+        return Result.Success();
+    }
+
+    /// <summary>Hash permettant de retrouver la convention correspondant à un lien de signature.</summary>
+    public static string HashSigningToken(string rawToken) => SecureToken.Hash(rawToken);
+
     public void SignByStudent() => Sign(ConventionParty.Student);
     public void SignByCompany() => Sign(ConventionParty.Company);
     public void SignBySchool() => Sign(ConventionParty.School);
@@ -84,6 +170,7 @@ public class Convention : BaseAuditableEntity
         if (IsSignedByStudent && IsSignedByCompany && IsSignedBySchool && SignedAt == null)
         {
             SignedAt = DateTime.UtcNow;
+            AddDomainEvent(new ConventionFullySignedEvent(Id, InternshipId, SignedAt.Value));
         }
     }
 }

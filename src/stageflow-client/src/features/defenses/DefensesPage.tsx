@@ -24,6 +24,8 @@ const ROLE_ICONS: Record<DefenseRole, any> = {
   TuteurEntreprise: faBuilding,
 };
 
+type GradeMode = 'record' | 'evaluate' | 'correct';
+
 export const DefensesPage: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -45,6 +47,8 @@ export const DefensesPage: React.FC = () => {
   const [grade, setGrade] = useState('');
   const [gradeComments, setGradeComments] = useState('');
   const [gradeError, setGradeError] = useState('');
+  const [gradeMode, setGradeMode] = useState<GradeMode>('record');
+  const [correctionReason, setCorrectionReason] = useState('');
 
   const { data: defenses = [], isLoading } = useQuery<DefenseDto[]>({
     queryKey: ['defenses'],
@@ -120,10 +124,14 @@ export const DefensesPage: React.FC = () => {
     mutationFn: async () => {
       if (!gradeDefense) return;
       setGradeError('');
-      await apiClient.post(`/defenses/${gradeDefense.id}/grade`, {
-        grade: Number(grade.replace(',', '.')),
-        comments: gradeComments || null
-      });
+      const value = Number(grade.replace(',', '.'));
+      if (gradeMode === 'evaluate') {
+        await apiClient.put(`/defenses/${gradeDefense.id}/evaluations/me`, { grade: value, comment: gradeComments || null });
+      } else if (gradeMode === 'correct') {
+        await apiClient.put(`/defenses/${gradeDefense.id}/grade`, { grade: value, comments: gradeComments || null, reason: correctionReason });
+      } else {
+        await apiClient.post(`/defenses/${gradeDefense.id}/grade`, { grade: value, comments: gradeComments || null });
+      }
     },
     onSuccess: () => { invalidateAll(); setGradeDefense(null); },
     onError: (err: any) => setGradeError(apiErrorMessage(err, 'Erreur lors de la saisie de la note.'))
@@ -151,8 +159,14 @@ export const DefensesPage: React.FC = () => {
     if (selected) setCompanyTutor(selected.companySupervisorName || '');
   };
 
-  const openGradeDialog = (d: DefenseDto) => {
-    setGradeDefense(d); setGrade(''); setGradeComments(''); setGradeError('');
+  const openGradeDialog = (d: DefenseDto, mode: GradeMode) => {
+    const mine = d.evaluations.find(e => e.teacherId === user?.id);
+    const initial = mode === 'evaluate' ? mine?.grade
+      : mode === 'correct' ? d.finalGrade
+      : d.averageEvaluation;
+    setGradeDefense(d); setGradeMode(mode); setGradeError(''); setCorrectionReason('');
+    setGrade(initial !== undefined && initial !== null ? String(initial) : '');
+    setGradeComments(mode === 'evaluate' ? (mine?.comment ?? '') : (d.comments ?? ''));
   };
 
   const juryValid = !!presidentId && internalJury().length + (companyTutor.trim() ? 1 : 0) >= 2;
@@ -172,8 +186,24 @@ export const DefensesPage: React.FC = () => {
       </select>
     );
 
-  const canGrade = (d: DefenseDto) =>
-    isCoord && (d.finalGrade === undefined || d.finalGrade === null) && new Date(d.scheduledAt) <= new Date();
+  const started = (d: DefenseDto) => new Date(d.scheduledAt) <= new Date();
+  const isGraded = (d: DefenseDto) => d.finalGrade !== undefined && d.finalGrade !== null;
+  const isMember = (d: DefenseDto) => d.juryMembers.some(m => m.teacherId === user?.id);
+  const isPresident = (d: DefenseDto) => d.juryMembers.some(m => m.teacherId === user?.id && m.role === 'President');
+
+  // Note finale : président du jury ou responsable/admin, une fois la soutenance commencée.
+  const canGrade = (d: DefenseDto) => (isCoord || isPresident(d)) && !isGraded(d) && started(d);
+  const canEvaluate = (d: DefenseDto) => isMember(d) && !isGraded(d) && started(d);
+  const canCorrect = (d: DefenseDto) => isCoord && isGraded(d);
+  const hasTutor = (d: DefenseDto) => d.juryMembers.some(m => m.role === 'TuteurEntreprise');
+  const tutorEvaluated = (d: DefenseDto) => d.evaluations.some(e => e.teacherId.startsWith('external:'));
+
+  const [defenseNotice, setDefenseNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const tutorLinkMutation = useMutation({
+    mutationFn: async (id: string) => { await apiClient.post(`/defenses/${id}/tutor-evaluation-link`); },
+    onSuccess: () => setDefenseNotice({ kind: 'ok', text: "Lien d'évaluation envoyé par e-mail au tuteur entreprise." }),
+    onError: (err: any) => setDefenseNotice({ kind: 'error', text: apiErrorMessage(err, "Envoi du lien impossible.") }),
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -197,6 +227,13 @@ export const DefensesPage: React.FC = () => {
           </button>
         )}
       </div>
+
+      {defenseNotice && (
+        <div className={`p-3 rounded-lg text-sm flex justify-between ${defenseNotice.kind === 'ok' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+          <span>{defenseNotice.text}</span>
+          <button onClick={() => setDefenseNotice(null)} aria-label="Fermer" className="font-bold px-2">×</button>
+        </div>
+      )}
 
       {/* Table Card */}
       <Card header={<CardHeader titleText={`Soutenances planifiées (${defenses.length})`} />}>
@@ -249,17 +286,46 @@ export const DefensesPage: React.FC = () => {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {d.finalGrade !== undefined && d.finalGrade !== null ? (
-                      <Tag colorScheme="8">{d.finalGrade}/20</Tag>
-                    ) : canGrade(d) ? (
-                      <Button design="Emphasized" onClick={() => openGradeDialog(d)}>
-                        <FontAwesomeIcon icon={faPenToSquare} className="mr-1" /> Saisir la note
-                      </Button>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs text-gray-400">
-                        <FontAwesomeIcon icon={faClock} /> En attente
-                      </span>
-                    )}
+                    <div className="flex flex-col gap-1 items-start">
+                      {isGraded(d) ? (
+                        <Tag colorScheme="8">{d.finalGrade}/20</Tag>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-gray-400">
+                          <FontAwesomeIcon icon={faClock} /> {started(d) ? 'Note à arrêter' : 'À venir'}
+                        </span>
+                      )}
+                      {d.gradeCorrectionReason && (
+                        <span className="text-[11px] text-amber-700" title={d.gradeCorrectionReason}>
+                          Note corrigée : {d.gradeCorrectionReason}
+                        </span>
+                      )}
+                      {d.evaluations.length > 0 && (
+                        <span className="text-[11px] text-gray-500">
+                          {d.evaluations.length} évaluation(s) du jury · moyenne {d.averageEvaluation}/20
+                        </span>
+                      )}
+                      {canEvaluate(d) && (
+                        <Button onClick={() => openGradeDialog(d, 'evaluate')}>
+                          <FontAwesomeIcon icon={faPenToSquare} className="mr-1" />
+                          {d.evaluations.some(e => e.teacherId === user?.id) ? 'Modifier mon évaluation' : 'Mon évaluation'}
+                        </Button>
+                      )}
+                      {canGrade(d) && (
+                        <Button design="Emphasized" onClick={() => openGradeDialog(d, 'record')}>
+                          <FontAwesomeIcon icon={faCheck} className="mr-1" /> Arrêter la note finale
+                        </Button>
+                      )}
+                      {isCoord && hasTutor(d) && !isGraded(d) && (
+                        <Button design="Transparent" onClick={() => tutorLinkMutation.mutate(d.id)} disabled={tutorLinkMutation.isPending}>
+                          {tutorEvaluated(d) ? 'Tuteur : évaluation reçue (renvoyer le lien)' : "Envoyer le lien d'évaluation au tuteur"}
+                        </Button>
+                      )}
+                      {canCorrect(d) && (
+                        <Button design="Transparent" onClick={() => openGradeDialog(d, 'correct')}>
+                          Corriger la note
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -377,14 +443,18 @@ export const DefensesPage: React.FC = () => {
 
       {/* Grade Dialog */}
       {gradeDefense && (
-        <Dialog open headerText="Saisie de la note finale"
+        <Dialog open headerText={gradeMode === 'evaluate' ? 'Mon évaluation de la soutenance'
+            : gradeMode === 'correct' ? 'Correction de la note finale' : 'Note finale de la soutenance'}
           footer={
             <Bar endContent={
               <>
                 <Button design="Transparent" onClick={() => setGradeDefense(null)}>Annuler</Button>
                 <Button design="Emphasized" onClick={() => gradeMutation.mutate()}
-                  disabled={grade === '' || gradeMutation.isPending}>
-                  {gradeMutation.isPending ? 'Enregistrement...' : 'Enregistrer et clôturer le stage'}
+                  disabled={grade === '' || (gradeMode === 'correct' && !correctionReason.trim()) || gradeMutation.isPending}>
+                  {gradeMutation.isPending ? 'Enregistrement...'
+                    : gradeMode === 'evaluate' ? 'Enregistrer mon évaluation'
+                    : gradeMode === 'correct' ? 'Enregistrer la correction'
+                    : 'Arrêter la note et clôturer le stage'}
                 </Button>
               </>
             } />
@@ -397,6 +467,14 @@ export const DefensesPage: React.FC = () => {
               </div>
             )}
             <Text><strong>{gradeDefense.studentName}</strong> — {gradeDefense.internshipTitle}</Text>
+            {gradeMode !== 'evaluate' && gradeDefense.evaluations.length > 0 && (
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded text-xs">
+                <div className="font-semibold mb-1">Évaluations du jury (moyenne {gradeDefense.averageEvaluation}/20) :</div>
+                {gradeDefense.evaluations.map(e => (
+                  <div key={e.teacherId}>{e.teacherFullName} : <strong>{e.grade}/20</strong>{e.comment ? ` — ${e.comment}` : ''}</div>
+                ))}
+              </div>
+            )}
             <div>
               <label className="block mb-1 font-semibold text-sm">Note sur 20 :</label>
               <input type="number" min={0} max={20} step={0.25} value={grade}
@@ -406,8 +484,19 @@ export const DefensesPage: React.FC = () => {
               <label className="block mb-1 font-semibold text-sm">Appréciation du jury (optionnel) :</label>
               <TextArea rows={3} value={gradeComments} onInput={(e: any) => setGradeComments(e.target.value)} style={{ width: '100%' }} />
             </div>
+            {gradeMode === 'correct' && (
+              <div>
+                <label className="block mb-1 font-semibold text-sm">Motif de la correction (obligatoire) :</label>
+                <TextArea rows={2} value={correctionReason} onInput={(e: any) => setCorrectionReason(e.target.value)}
+                  placeholder="Ex: erreur de report constatée lors de la délibération" style={{ width: '100%' }} />
+              </div>
+            )}
             <Text style={{ fontSize: '12px', color: '#666' }}>
-              L'enregistrement de la note clôture définitivement le dossier (statut « Terminé »).
+              {gradeMode === 'evaluate'
+                ? "Votre évaluation reste modifiable jusqu'à ce que la note finale soit arrêtée. Elle n'est pas visible par l'élève."
+                : gradeMode === 'correct'
+                ? "L'ancienne et la nouvelle note sont conservées dans le journal d'audit."
+                : "Arrêter la note clôture définitivement le dossier (statut « Terminé »)."}
             </Text>
           </div>
         </Dialog>

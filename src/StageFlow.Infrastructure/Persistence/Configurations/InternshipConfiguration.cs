@@ -72,6 +72,14 @@ public class InternshipConfiguration : IEntityTypeConfiguration<Internship>
             .HasForeignKey(i => i.InternshipOfferId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.Property(i => i.CancellationReason)
+            .HasMaxLength(FieldLimits.RejectionReason);
+
+        builder.Property(i => i.AcademicYear)
+            .HasMaxLength(FieldLimits.AcademicYear)
+            .IsRequired();
+
+        builder.HasIndex(i => i.AcademicYear);
         builder.HasIndex(i => i.StudentId);
         builder.HasIndex(i => i.Status);
     }

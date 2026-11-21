@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StageFlow.Application.Common.Security;
 using StageFlow.Application.Features.Defenses.DTOs;
 using StageFlow.Application.Features.Defenses.Services;
@@ -11,11 +12,13 @@ public class DefensesController : ApiControllerBase
 {
     private readonly IDefenseService _defenseService;
     private readonly IAccessControlService _accessControl;
+    private readonly ITutorEvaluationService _tutorEvaluation;
 
-    public DefensesController(IDefenseService defenseService, IAccessControlService accessControl)
+    public DefensesController(IDefenseService defenseService, IAccessControlService accessControl, ITutorEvaluationService tutorEvaluation)
     {
         _defenseService = defenseService;
         _accessControl = accessControl;
+        _tutorEvaluation = tutorEvaluation;
     }
 
     [HttpGet]
@@ -54,11 +57,44 @@ public class DefensesController : ApiControllerBase
         return Ok(result);
     }
 
-    /// <summary>Enseignants pouvant siéger dans un jury ou encadrer un stage.</summary>
+    /// <summary>
+    /// Enseignants actifs. Sans filtre : tous (composition d'un jury, qui peut inclure des enseignants d'autres filières).
+    /// Avec <paramref name="trackId"/> : seuls ceux habilités à encadrer un stage de cette filière.
+    /// </summary>
     [HttpGet("/api/v1/teachers")]
     [Authorize(Policy = "RequireDepartmentHeadRole")]
-    public async Task<IActionResult> GetTeachers(CancellationToken cancellationToken)
-        => Ok(await _defenseService.GetTeachersAsync(cancellationToken));
+    public async Task<IActionResult> GetTeachers([FromQuery] Guid? trackId, CancellationToken cancellationToken)
+        => Ok(await _defenseService.GetTeachersAsync(trackId, cancellationToken));
+
+    /// <summary>Évaluation individuelle (note proposée + appréciation) par un membre interne du jury.</summary>
+    [HttpPut("{id:guid}/evaluations/me")]
+    [Authorize(Policy = "RequireSupervisorRole")]
+    public async Task<IActionResult> SubmitEvaluation(Guid id, [FromBody] SubmitEvaluationCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanAccessDefenseAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _defenseService.SubmitEvaluationAsync(id, command, _accessControl.UserId!, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Évaluation impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Correction d'une note déjà enregistrée : responsable de filière ou administrateur, motif obligatoire.</summary>
+    [HttpPut("{id:guid}/grade")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> CorrectGrade(Guid id, [FromBody] CorrectGradeCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanManageDefenseAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _defenseService.CorrectGradeAsync(id, command, _accessControl.UserId!, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Correction impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
 
     [HttpPost]
     [Authorize(Policy = "RequireDepartmentHeadRole")]
@@ -76,11 +112,16 @@ public class DefensesController : ApiControllerBase
         return CreatedAtAction(nameof(GetDefenseById), new { id = result.Value!.Id }, result.Value);
     }
 
+    /// <summary>
+    /// Note finale : arrêtée par le président du jury, ou par le responsable de filière / l'administrateur.
+    /// </summary>
     [HttpPost("{id:guid}/grade")]
-    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    [Authorize(Policy = "RequireSupervisorRole")]
     public async Task<IActionResult> RecordGrade(Guid id, [FromBody] RecordGradeCommand command, CancellationToken cancellationToken)
     {
-        if (!await _accessControl.CanManageDefenseAsync(id, cancellationToken))
+        var allowed = await _accessControl.CanManageDefenseAsync(id, cancellationToken)
+                      || await _defenseService.IsJuryPresidentAsync(id, _accessControl.UserId!, cancellationToken);
+        if (!allowed)
             return Forbid();
 
         var currentUserId = _accessControl.UserId!;
@@ -88,6 +129,45 @@ public class DefensesController : ApiControllerBase
 
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Saisie de note impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Envoie au tuteur entreprise (membre externe du jury) son lien personnel d'évaluation.</summary>
+    [HttpPost("{id:guid}/tutor-evaluation-link")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> SendTutorEvaluationLink(Guid id, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanManageDefenseAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _tutorEvaluation.SendLinkAsync(id, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Envoi impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    [HttpGet("tutor-evaluation/{token}")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> GetTutorEvaluation(string token, CancellationToken cancellationToken)
+    {
+        var result = await _tutorEvaluation.GetInfoAsync(token, cancellationToken);
+        if (result.IsFailure)
+            return NotFound(new ProblemDetails { Title = "Lien invalide", Detail = result.Error, Status = 404 });
+
+        return Ok(result.Value);
+    }
+
+    [HttpPut("tutor-evaluation/{token}")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> SubmitTutorEvaluation(string token, [FromBody] SubmitEvaluationCommand command, CancellationToken cancellationToken)
+    {
+        var result = await _tutorEvaluation.SubmitAsync(token, command, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Évaluation impossible", Detail = result.Error, Status = 400 });
 
         return NoContent();
     }

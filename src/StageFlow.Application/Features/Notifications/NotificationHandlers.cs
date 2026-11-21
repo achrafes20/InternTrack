@@ -26,12 +26,13 @@ public class InternshipStatusChangedNotificationHandler : IDomainEventHandler<In
     {
         var internship = await _context.Internships.AsNoTracking()
             .Where(i => i.Id == domainEvent.InternshipId)
-            .Select(i => new { i.Title, i.StudentId, i.AcademicTrackId, i.RejectionReason })
+            .Select(i => new { i.Title, i.StudentId, i.AcademicTrackId, i.RejectionReason, i.CancellationReason })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (internship == null) return;
 
         var title = WebUtility.HtmlEncode(internship.Title);
+        var cancellationReason = internship.CancellationReason;
 
         if (domainEvent.NewStatus == InternshipStatus.Propose)
         {
@@ -55,6 +56,7 @@ public class InternshipStatusChangedNotificationHandler : IDomainEventHandler<In
             InternshipStatus.EnCours => "est désormais <strong>en cours</strong>. Pensez à déposer vos rapports hebdomadaires.",
             InternshipStatus.SoutenancePlanifiee => "a une <strong>soutenance planifiée</strong>. Consultez le planning des soutenances.",
             InternshipStatus.Termine => "est <strong>terminé</strong>. Félicitations !",
+            InternshipStatus.Annule => $"a été <strong>annulé</strong> par l'école. Motif : {WebUtility.HtmlEncode(cancellationReason ?? "—")}.",
             _ => null
         };
 
@@ -79,12 +81,14 @@ public class DefenseScheduledNotificationHandler : IDomainEventHandler<DefenseSc
     private readonly IApplicationDbContext _context;
     private readonly IIdentityService _identityService;
     private readonly IEmailSender _emailSender;
+    private readonly ITimeZoneService _timeZone;
 
-    public DefenseScheduledNotificationHandler(IApplicationDbContext context, IIdentityService identityService, IEmailSender emailSender)
+    public DefenseScheduledNotificationHandler(IApplicationDbContext context, IIdentityService identityService, IEmailSender emailSender, ITimeZoneService timeZone)
     {
         _context = context;
         _identityService = identityService;
         _emailSender = emailSender;
+        _timeZone = timeZone;
     }
 
     public async Task HandleAsync(DefenseScheduledEvent domainEvent, CancellationToken cancellationToken)
@@ -105,7 +109,7 @@ public class DefenseScheduledNotificationHandler : IDomainEventHandler<DefenseSc
         var subject = $"[StageFlow ENSA] Soutenance planifiée : {defense.Internship.Title}";
         var body = $@"
             <p>La soutenance du stage <strong>{WebUtility.HtmlEncode(defense.Internship.Title)}</strong> est planifiée.</p>
-            <p><strong>Date :</strong> {defense.ScheduledAt:dd/MM/yyyy HH:mm} UTC (durée : {defense.DurationMinutes} min)</p>
+            <p><strong>Date :</strong> {_timeZone.FormatDateTime(defense.ScheduledAt)} (durée : {defense.DurationMinutes} min)</p>
             <p><strong>Salle :</strong> {WebUtility.HtmlEncode(defense.Classroom)}</p>";
 
         foreach (var userId in recipientIds)

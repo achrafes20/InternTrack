@@ -119,6 +119,7 @@ public class StageFlowDbContextInitialiser
                 Email = profEmail,
                 FirstName = "Mohamed",
                 LastName = "Tazi",
+                AcademicTrackId = giTrack?.Id,
                 EmailConfirmed = true
             };
             await _userManager.CreateAsync(profUser, "Prof@123456");
@@ -137,6 +138,7 @@ public class StageFlowDbContextInitialiser
                 FirstName = "Achraf",
                 LastName = "Bennani",
                 StudentNumber = "E1452930",
+                GraduationYear = 2027,
                 AcademicTrackId = giTrack.Id,
                 EmailConfirmed = true
             };
@@ -156,6 +158,7 @@ public class StageFlowDbContextInitialiser
                 FirstName = "Fatima-Zahra",
                 LastName = "El Mansouri",
                 StudentNumber = "E1452931",
+                GraduationYear = 2027,
                 AcademicTrackId = giTrack.Id,
                 EmailConfirmed = true
             };
@@ -175,11 +178,33 @@ public class StageFlowDbContextInitialiser
                 FirstName = "Mehdi",
                 LastName = "Chraibi",
                 StudentNumber = "E1452932",
+                GraduationYear = 2027,
                 AcademicTrackId = giTrack.Id,
                 EmailConfirmed = true
             };
             await _userManager.CreateAsync(student3User, "Student@123456");
             await _userManager.AddToRoleAsync(student3User, UserRole.Etudiant);
+        }
+
+        // Étudiant 4 (Yassine) : un élève ne pouvant suivre qu'un stage à la fois,
+        // le dossier validé de démonstration lui appartient.
+        var student4Email = "etudiant.yassine@ensa.ma";
+        var student4User = await _userManager.FindByEmailAsync(student4Email);
+        if (student4User == null && giTrack != null)
+        {
+            student4User = new ApplicationUser
+            {
+                UserName = student4Email,
+                Email = student4Email,
+                FirstName = "Yassine",
+                LastName = "Amrani",
+                StudentNumber = "E1452933",
+                GraduationYear = 2027,
+                AcademicTrackId = giTrack.Id,
+                EmailConfirmed = true
+            };
+            await _userManager.CreateAsync(student4User, "Student@123456");
+            await _userManager.AddToRoleAsync(student4User, UserRole.Etudiant);
         }
     }
 
@@ -264,6 +289,7 @@ public class StageFlowDbContextInitialiser
         var studentAchraf = await _userManager.FindByEmailAsync("etudiant.achraf@ensa.ma");
         var studentFatima = await _userManager.FindByEmailAsync("etudiant.fatima@ensa.ma");
         var studentMehdi = await _userManager.FindByEmailAsync("etudiant.mehdi@ensa.ma");
+        var studentYassine = await _userManager.FindByEmailAsync("etudiant.yassine@ensa.ma");
         var profTazi = await _userManager.FindByEmailAsync("prof.tazi@ensa.ma");
         var respAlami = await _userManager.FindByEmailAsync("responsable.gi@ensa.ma");
 
@@ -342,21 +368,22 @@ public class StageFlowDbContextInitialiser
 
             // 2. Stage VALIDÉ en attente de démarrage (pour tester le bouton "Démarrer le stage" par le Responsable)
             var hasValideStage = await _context.Internships.AnyAsync(i => i.Status == InternshipStatus.Valide);
-            if (!hasValideStage && ocp != null)
+            if (!hasValideStage && ocp != null && studentYassine != null)
             {
+                // Stage validé qui commence la semaine prochaine (signature entreprise encore attendue).
                 var stageValide = new Internship(
                     "Data Pipeline Temps Réel & Analyse Prédictive",
                     "Conception d'une architecture streaming avec Apache Kafka et intégration d'un modèle d'IA pour la détection précoce d'anomalies sur les chaînes de traitement.",
-                    DateTime.UtcNow.AddMonths(-1),
-                    DateTime.UtcNow.AddMonths(5),
-                    studentAchraf.Id,
+                    DateTime.UtcNow.Date.AddDays(7),
+                    DateTime.UtcNow.Date.AddDays(7).AddMonths(6),
+                    studentYassine.Id,
                     ocp.Id,
                     giTrack.Id,
                     "Anas Tazi",
                     "a.tazi@ocpgroup.ma",
                     "+212 663 889900"
                 );
-                stageValide.SubmitForApproval(studentAchraf.Id);
+                stageValide.SubmitForApproval(studentYassine.Id);
                 stageValide.Approve(respAlami.Id);
                 stageValide.AssignAcademicSupervisor(profTazi.Id);
 

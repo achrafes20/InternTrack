@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faShieldHalved, faClipboardList, faChalkboardUser,
@@ -146,6 +146,9 @@ export const LoginPage: React.FC = () => {
                 : <><FontAwesomeIcon icon={faArrowRightToBracket} /> Se connecter</>
               }
             </button>
+            <Link to="/forgot-password" className="block text-center text-xs text-blue-600 hover:underline mt-1">
+              Mot de passe oublié ?
+            </Link>
           </form>
 
           {/* Connexion rapide */}

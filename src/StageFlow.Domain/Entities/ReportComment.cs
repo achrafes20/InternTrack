@@ -19,6 +19,8 @@ public class ReportComment : BaseAuditableEntity
         AuthorId = authorId ?? throw new ArgumentNullException(nameof(authorId));
         AuthorFullName = FieldLimits.Truncate(authorFullName ?? throw new ArgumentNullException(nameof(authorFullName)), FieldLimits.PersonName);
         Content = content ?? throw new ArgumentNullException(nameof(content));
+
+        AddDomainEvent(new Events.ReportCommentAddedEvent(Id, progressReportId, authorId, DateTime.UtcNow));
     }
 }
 

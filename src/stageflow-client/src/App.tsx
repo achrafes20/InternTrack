@@ -11,6 +11,10 @@ import { DefensesPage } from './features/defenses/DefensesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { AuditPage } from './features/audit/AuditPage';
 import { VerifyConventionPage } from './features/conventions/VerifyConventionPage';
+import { CompanySignPage } from './features/conventions/CompanySignPage';
+import { TutorEvaluationPage } from './features/defenses/TutorEvaluationPage';
+import { AnomaliesPage } from './features/anomalies/AnomaliesPage';
+import { ForgotPasswordPage, ResetPasswordPage } from './features/auth/PasswordPages';
 import { BusyIndicator } from '@ui5/webcomponents-react';
 
 interface ProtectedRouteProps {
@@ -48,6 +52,10 @@ export const App: React.FC = () => {
       {/* Public routes */}
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       <Route path="/verify-convention/:token" element={<VerifyConventionPage />} />
+      <Route path="/convention/sign/:token" element={<CompanySignPage />} />
+      <Route path="/defense/evaluate/:token" element={<TutorEvaluationPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* Protected routes wrapped in MainLayout */}
       <Route
@@ -71,6 +79,14 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={['Admin']}>
               <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="anomalies"
+          element={
+            <ProtectedRoute allowedRoles={['Admin', 'ResponsableFiliere']}>
+              <AnomaliesPage />
             </ProtectedRoute>
           }
         />

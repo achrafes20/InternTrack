@@ -12,6 +12,7 @@ export interface User {
   isActive?: boolean;
   academicTrackCode?: string;
   isLockedOut?: boolean;
+  graduationYear?: number;
 }
 
 export type UserDto = User;
@@ -75,7 +76,8 @@ export type InternshipStatus =
   | 'Refuse'
   | 'EnCours'
   | 'SoutenancePlanifiee'
-  | 'Termine';
+  | 'Termine'
+  | 'Annule';
 
 export interface ConventionStatus {
   conventionNumber: string;
@@ -83,6 +85,16 @@ export interface ConventionStatus {
   isSignedByCompany: boolean;
   isSignedBySchool: boolean;
   signedAt?: string;
+  companySignerName?: string;
+  companySigningLinkExpiresAt?: string;
+}
+
+export interface InternshipDocument {
+  id: string;
+  kind: 'FinalThesis' | 'SignedConvention';
+  fileName: string;
+  sizeBytes: number;
+  uploadedAt: string;
 }
 
 export type ConventionParty = 'Student' | 'Company' | 'School';
@@ -96,6 +108,8 @@ export interface Internship {
   status: InternshipStatus;
   statusName: InternshipStatus;
   rejectionReason?: string;
+  cancellationReason?: string;
+  academicYear: string;
   studentId: string;
   studentName?: string;
   academicSupervisorId?: string;
@@ -109,6 +123,8 @@ export interface Internship {
   academicTrackCode: string;
   internshipOfferId?: string;
   convention?: ConventionStatus;
+  documents: InternshipDocument[];
+  totalWeeks: number;
 }
 
 export type InternshipDto = Internship;
@@ -171,6 +187,19 @@ export interface Defense {
   finalGrade?: number;
   comments?: string;
   juryMembers: JuryMember[];
+  evaluations: DefenseEvaluation[];
+  averageEvaluation?: number;
+  gradedAt?: string;
+  gradeCorrectionReason?: string;
+  gradeCorrectedAt?: string;
+}
+
+export interface DefenseEvaluation {
+  teacherId: string;
+  teacherFullName: string;
+  grade: number;
+  comment?: string;
+  submittedAt: string;
 }
 
 export type DefenseDto = Defense;
@@ -189,6 +218,29 @@ export interface DashboardStats {
   topCompanies: Array<{ companyName: string; count: number }>;
   internshipsByTrack: Array<{ trackCode: string; trackName: string; count: number }>;
   upcomingDefenses: Array<{ id: string; studentName: string; internshipTitle: string; scheduledAt: string; classroom: string }>;
+  academicYear?: string;
+  yearlyStats?: YearlyStat[];
+}
+
+export interface YearlyStat {
+  academicYear: string;
+  total: number;
+  inProgress: number;
+  completed: number;
+  cancelled: number;
+  averageFinalGrade?: number;
+}
+
+export interface Anomaly {
+  code: string;
+  severity: 'Error' | 'Warning';
+  title: string;
+  detail: string;
+  resolution: string;
+  internshipId?: string;
+  internshipTitle?: string;
+  studentName?: string;
+  userId?: string;
 }
 
 export interface AuditLog {

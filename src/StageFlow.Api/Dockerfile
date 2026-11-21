@@ -21,13 +21,18 @@ WORKDIR /app
 EXPOSE 8080
 EXPOSE 8081
 
-# Install fonts for QuestPDF PDF generation and curl for the container healthcheck
+# Polices pour QuestPDF, curl pour le healthcheck, tzdata pour le fuseau Africa/Casablanca
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     fontconfig \
     fonts-liberation \
     fonts-dejavu-core \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Fichiers déposés (mémoires, conventions signées) et clés de protection des données : volume persistant.
+RUN mkdir -p /app/data/uploads /app/data/keys
+VOLUME ["/app/data"]
 
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "StageFlow.Api.dll"]

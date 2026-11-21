@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using StageFlow.Application.Common.Interfaces;
@@ -21,18 +22,141 @@ public class IdentityService : IIdentityService
     private readonly RoleManager<IdentityRole> _roleManager;
     private readonly StageFlowDbContext _context;
     private readonly JwtSettings _jwtSettings;
+    private readonly IEmailSender _emailSender;
+    private readonly IConfiguration _configuration;
 
     public IdentityService(
         UserManager<ApplicationUser> userManager,
         RoleManager<IdentityRole> roleManager,
         StageFlowDbContext context,
-        IOptions<JwtSettings> jwtSettings)
+        IOptions<JwtSettings> jwtSettings,
+        IEmailSender emailSender,
+        IConfiguration configuration)
     {
         _userManager = userManager;
         _roleManager = roleManager;
         _context = context;
         _jwtSettings = jwtSettings.Value;
+        _emailSender = emailSender;
+        _configuration = configuration;
     }
+
+    public async Task<Result> SetUserActiveAsync(string userId, bool isActive, string currentUserId, CancellationToken cancellationToken)
+    {
+        if (userId == currentUserId && !isActive)
+            return Result.Failure("Vous ne pouvez pas désactiver votre propre compte.");
+
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+            return Result.Failure("Utilisateur introuvable.");
+
+        if (user.IsActive == isActive)
+            return Result.Success();
+
+        user.IsActive = isActive;
+        var update = await _userManager.UpdateAsync(user);
+        if (!update.Succeeded)
+            return Result.Failure(string.Join("; ", update.Errors.Select(e => e.Description)));
+
+        if (!isActive)
+        {
+            // Plus aucun rafraîchissement possible : l'accès cesse au plus tard à l'expiration de l'access token.
+            await RevokeAllActiveTokensAsync(user.Id, null, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return Result.Success();
+    }
+
+    public async Task<Result> ChangePasswordAsync(string userId, string currentPassword, string newPassword, CancellationToken cancellationToken)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null || !user.IsActive)
+            return Result.Failure("Utilisateur introuvable ou inactif.");
+
+        var change = await _userManager.ChangePasswordAsync(user, currentPassword, newPassword);
+        if (!change.Succeeded)
+        {
+            return Result.Failure(change.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordMismatch))
+                ? "Le mot de passe actuel est incorrect."
+                : string.Join(" ", change.Errors.Select(e => e.Description)));
+        }
+
+        // Les autres appareils doivent se reconnecter avec le nouveau mot de passe.
+        await RevokeAllActiveTokensAsync(user.Id, null, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        await SendPasswordChangedAlertAsync(user, cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task RequestPasswordResetAsync(string email, CancellationToken cancellationToken)
+    {
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null || !user.IsActive)
+            return; // Aucune information divulguée sur l'existence du compte.
+
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var encodedToken = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
+        var frontendBaseUrl = (_configuration["AppConfig:FrontendBaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
+        var link = $"{frontendBaseUrl}/reset-password?email={Uri.EscapeDataString(user.Email!)}&token={encodedToken}";
+
+        await _emailSender.SendEmailAsync(
+            user.Email!,
+            "[StageFlow ENSA] Réinitialisation de votre mot de passe",
+            $@"<p>Bonjour {System.Net.WebUtility.HtmlEncode(user.FirstName)},</p>
+               <p>Une réinitialisation de votre mot de passe a été demandée. Ce lien est valable 2 heures et ne peut servir qu'une fois :</p>
+               <p><a href=""{link}"">Choisir un nouveau mot de passe</a></p>
+               <p>Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe reste inchangé.</p>",
+            cancellationToken);
+    }
+
+    public async Task<Result> ResetPasswordAsync(string email, string token, string newPassword, CancellationToken cancellationToken)
+    {
+        const string invalidLink = "Ce lien de réinitialisation est invalide ou a expiré. Faites une nouvelle demande.";
+
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null || !user.IsActive)
+            return Result.Failure(invalidLink);
+
+        string decodedToken;
+        try
+        {
+            decodedToken = Encoding.UTF8.GetString(Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlDecode(token));
+        }
+        catch (FormatException)
+        {
+            return Result.Failure(invalidLink);
+        }
+
+        var reset = await _userManager.ResetPasswordAsync(user, decodedToken, newPassword);
+        if (!reset.Succeeded)
+        {
+            return Result.Failure(reset.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.InvalidToken))
+                ? invalidLink
+                : string.Join(" ", reset.Errors.Select(e => e.Description)));
+        }
+
+        // Un mot de passe réinitialisé lève aussi un éventuel verrouillage et ferme les sessions existantes.
+        await _userManager.SetLockoutEndDateAsync(user, null);
+        await _userManager.ResetAccessFailedCountAsync(user);
+        await RevokeAllActiveTokensAsync(user.Id, null, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        await SendPasswordChangedAlertAsync(user, cancellationToken);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Alerte de sécurité : si le titulaire n'est pas à l'origine du changement, il le sait immédiatement.
+    /// </summary>
+    private Task SendPasswordChangedAlertAsync(ApplicationUser user, CancellationToken cancellationToken)
+        => _emailSender.SendEmailAsync(
+            user.Email!,
+            "[StageFlow ENSA] Votre mot de passe a été modifié",
+            $"<p>Bonjour {System.Net.WebUtility.HtmlEncode(user.FirstName)},</p>" +
+            "<p>Le mot de passe de votre compte StageFlow vient d'être modifié ; vos autres sessions ont été fermées.</p>" +
+            "<p>Si vous n'êtes pas à l'origine de ce changement, utilisez immédiatement « Mot de passe oublié » " +
+            "et prévenez l'administration de l'école.</p>",
+            cancellationToken);
 
     public async Task<Result<AuthResponse>> AuthenticateAsync(string email, string password, string? ipAddress, CancellationToken cancellationToken)
     {
@@ -187,6 +311,7 @@ public class IdentityService : IIdentityService
         string role,
         string? studentNumber,
         Guid? academicTrackId,
+        int? graduationYear,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
@@ -214,6 +339,7 @@ public class IdentityService : IIdentityService
             LastName = lastName,
             StudentNumber = studentNumber,
             AcademicTrackId = academicTrackId,
+            GraduationYear = role == UserRole.Etudiant ? graduationYear : null,
             EmailConfirmed = true
         };
 
@@ -285,7 +411,7 @@ public class IdentityService : IIdentityService
         return users.ToDictionary(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim());
     }
 
-    public async Task<Result> UpdateUserRoleAsync(string userId, string newRole, Guid? academicTrackId, string currentUserId, CancellationToken cancellationToken)
+    public async Task<Result> UpdateUserRoleAsync(string userId, string newRole, Guid? academicTrackId, int? graduationYear, string currentUserId, CancellationToken cancellationToken)
     {
         var user = await _userManager.FindByIdAsync(userId);
         if (user == null)
@@ -303,9 +429,11 @@ public class IdentityService : IIdentityService
         if (trackValidation.IsFailure)
             return trackValidation;
 
-        if (user.AcademicTrackId != effectiveTrackId)
+        var effectiveGraduationYear = newRole == UserRole.Etudiant ? graduationYear ?? user.GraduationYear : null;
+        if (user.AcademicTrackId != effectiveTrackId || user.GraduationYear != effectiveGraduationYear)
         {
             user.AcademicTrackId = effectiveTrackId;
+            user.GraduationYear = effectiveGraduationYear;
             var update = await _userManager.UpdateAsync(user);
             if (!update.Succeeded)
                 return Result.Failure(string.Join("; ", update.Errors.Select(e => e.Description)));
@@ -394,7 +522,8 @@ public class IdentityService : IIdentityService
         user.AcademicTrackId,
         user.IsActive,
         trackCode,
-        user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow);
+        user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow,
+        user.GraduationYear);
 
     public async Task<bool> IsUserInRoleAsync(string userId, string role, CancellationToken cancellationToken)
     {

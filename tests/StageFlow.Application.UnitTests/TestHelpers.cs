@@ -6,11 +6,48 @@ using StageFlow.Domain.Common;
 using StageFlow.Domain.Entities;
 using StageFlow.Domain.Enums;
 using StageFlow.Infrastructure.Persistence;
+using StageFlow.Application.Features.Internships;
 
 namespace StageFlow.Application.UnitTests;
 
+/// <summary>Stockage de fichiers en mémoire pour les tests.</summary>
+internal sealed class InMemoryFileStorage : IFileStorage
+{
+    public Dictionary<string, byte[]> Files { get; } = new();
+
+    public async Task<string> SaveAsync(Stream content, string extension, CancellationToken cancellationToken)
+    {
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+        var key = $"{Guid.NewGuid():N}.{extension}";
+        Files[key] = buffer.ToArray();
+        return key;
+    }
+
+    public Task<Stream?> OpenReadAsync(string storageKey, CancellationToken cancellationToken)
+        => Task.FromResult<Stream?>(Files.TryGetValue(storageKey, out var bytes) ? new MemoryStream(bytes) : null);
+
+    public Task DeleteAsync(string storageKey, CancellationToken cancellationToken)
+    {
+        Files.Remove(storageKey);
+        return Task.CompletedTask;
+    }
+}
+
 internal static class TestHelpers
 {
+    public static readonly InternshipPolicy Policy = new();
+
+    public static ITimeZoneService MoroccoTime { get; } =
+        new StageFlow.Infrastructure.Services.Time.TimeZoneService(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+
+    /// <summary>Contenu PDF minimal valide (signature %PDF-).</summary>
+    public static byte[] FakePdf(int size = 1024)
+    {
+        var bytes = new byte[size];
+        "%PDF-1.7\n"u8.CopyTo(bytes);
+        return bytes;
+    }
     public static StageFlowDbContext CreateInMemoryDbContext()
     {
         var options = new DbContextOptionsBuilder<StageFlowDbContext>()

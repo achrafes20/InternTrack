@@ -32,6 +32,7 @@ public class InternshipsController : ApiControllerBase
         [FromQuery] string? studentId,
         [FromQuery] InternshipStatus? status,
         [FromQuery] Guid? trackId,
+        [FromQuery] string? academicYear,
         CancellationToken cancellationToken)
     {
         // Chaque rôle ne voit que le périmètre qui lui est autorisé.
@@ -58,8 +59,31 @@ public class InternshipsController : ApiControllerBase
             return Forbid();
         }
 
-        var result = await _internshipService.GetAllAsync(studentId, supervisorId, status, effectiveTrackId, cancellationToken);
+        var result = await _internshipService.GetAllAsync(studentId, supervisorId, status, effectiveTrackId, cancellationToken, academicYear);
         return Ok(result);
+    }
+
+    /// <summary>Années universitaires présentes (filtre des listes et du tableau de bord).</summary>
+    [HttpGet("academic-years")]
+    public async Task<IActionResult> GetAcademicYears(CancellationToken cancellationToken)
+    {
+        var trackId = _accessControl.IsAdmin ? null : _accessControl.AcademicTrackId;
+        return Ok(await _internshipService.GetAcademicYearsAsync(trackId, cancellationToken));
+    }
+
+    /// <summary>Annulation administrative d'un dossier (abandon, doublon, données incohérentes). Motif obligatoire.</summary>
+    [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> CancelInternship(Guid id, [FromBody] CancelInternshipCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanManageInternshipAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _internshipService.CancelAsync(id, _accessControl.UserId!, command.Reason, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Annulation impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
     }
 
     [HttpGet("{id:guid}")]

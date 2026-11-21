@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using StageFlow.Application.Common.Interfaces;
+using StageFlow.Application.Common.Models;
 using StageFlow.Application.Features.Dashboard.DTOs;
 using StageFlow.Domain.Entities;
 using StageFlow.Domain.Enums;
@@ -8,7 +9,10 @@ namespace StageFlow.Application.Features.Dashboard.Services;
 
 public interface IDashboardService
 {
-    Task<DashboardStatsDto> GetDashboardStatsAsync(string userId, string role, Guid? academicTrackId, CancellationToken cancellationToken);
+    Task<DashboardStatsDto> GetDashboardStatsAsync(string userId, string role, Guid? academicTrackId, CancellationToken cancellationToken, string? academicYear = null);
+
+    /// <summary>Export CSV (séparateur « ; », UTF-8 avec BOM : ouvrable directement dans Excel) des stages du périmètre.</summary>
+    Task<string> ExportCsvAsync(string userId, string role, Guid? academicTrackId, string? academicYear, CancellationToken cancellationToken);
 }
 
 public class DashboardService : IDashboardService
@@ -26,14 +30,39 @@ public class DashboardService : IDashboardService
         string userId,
         string role,
         Guid? academicTrackId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? academicYear = null)
     {
         // Chaque rôle ne voit que son périmètre (anti-fuite d'information).
-        var internships = ApplyInternshipScope(
+        var scoped = ApplyInternshipScope(
             _context.Internships.AsNoTracking(),
             userId,
             role,
             academicTrackId);
+
+        // Bilan par année, toutes années confondues (le filtre ci-dessous ne s'y applique pas).
+        var yearlyRaw = await scoped
+            .GroupBy(i => i.AcademicYear)
+            .Select(g => new
+            {
+                Year = g.Key,
+                Total = g.Count(),
+                InProgress = g.Count(i => i.Status == InternshipStatus.EnCours || i.Status == InternshipStatus.SoutenancePlanifiee),
+                Completed = g.Count(i => i.Status == InternshipStatus.Termine),
+                Cancelled = g.Count(i => i.Status == InternshipStatus.Annule),
+                Average = g.Where(i => i.Defense != null && i.Defense.FinalGrade != null).Average(i => (decimal?)i.Defense!.FinalGrade)
+            })
+            .ToListAsync(cancellationToken);
+
+        var yearlyStats = yearlyRaw
+            .OrderByDescending(y => y.Year)
+            .Select(y => new YearlyStatDto(y.Year, y.Total, y.InProgress, y.Completed, y.Cancelled,
+                y.Average.HasValue ? decimal.Round(y.Average.Value, 2) : null))
+            .ToList();
+
+        var internships = string.IsNullOrWhiteSpace(academicYear)
+            ? scoped
+            : scoped.Where(i => i.AcademicYear == academicYear);
 
         // Compteurs calculés côté SQL (pas de chargement de toutes les lignes en mémoire).
         var totalInternships = await internships.CountAsync(cancellationToken);
@@ -118,7 +147,67 @@ public class DashboardService : IDashboardService
             statusDistribution,
             topCompanies,
             byTrack,
-            upcomingDtos);
+            upcomingDtos,
+            academicYear,
+            yearlyStats);
+    }
+
+    public async Task<string> ExportCsvAsync(string userId, string role, Guid? academicTrackId, string? academicYear, CancellationToken cancellationToken)
+    {
+        var query = ApplyInternshipScope(_context.Internships.AsNoTracking(), userId, role, academicTrackId);
+        if (!string.IsNullOrWhiteSpace(academicYear))
+            query = query.Where(i => i.AcademicYear == academicYear);
+
+        var rows = await query
+            .OrderBy(i => i.AcademicYear).ThenBy(i => i.AcademicTrack.Code).ThenBy(i => i.StudentId)
+            .Select(i => new
+            {
+                i.AcademicYear,
+                i.StudentId,
+                Track = i.AcademicTrack.Code,
+                Company = i.Company.Name,
+                City = i.Company.City,
+                i.Title,
+                i.Period.StartDate,
+                i.Period.EndDate,
+                i.Status,
+                i.AcademicSupervisorId,
+                ConventionSigned = i.Convention != null && i.Convention.SignedAt != null,
+                Grade = i.Defense != null ? i.Defense.FinalGrade : null
+            })
+            .ToListAsync(cancellationToken);
+
+        var students = (await _identityService.GetUsersInRolesAsync(new[] { UserRole.Etudiant }, cancellationToken))
+            .ToDictionary(u => u.Id);
+        var supervisors = await _identityService.GetUserNamesAsync(
+            rows.Where(r => r.AcademicSupervisorId != null).Select(r => r.AcademicSupervisorId!).Distinct(), cancellationToken);
+
+        var csv = new CsvBuilder();
+        csv.AddRow("Année universitaire", "Promotion", "Élève", "Code Apogée", "Email", "Filière", "Entreprise", "Ville",
+            "Sujet", "Début", "Fin", "Statut", "Encadrant", "Convention signée", "Note finale");
+
+        foreach (var r in rows)
+        {
+            students.TryGetValue(r.StudentId, out var student);
+            csv.AddRow(
+                r.AcademicYear,
+                student?.GraduationYear?.ToString() ?? "",
+                student?.FullName ?? "",
+                student?.StudentNumber ?? "",
+                student?.Email ?? "",
+                r.Track,
+                r.Company,
+                r.City,
+                r.Title,
+                r.StartDate.ToString("dd/MM/yyyy"),
+                r.EndDate.ToString("dd/MM/yyyy"),
+                r.Status.ToString(),
+                r.AcademicSupervisorId != null ? supervisors.GetValueOrDefault(r.AcademicSupervisorId) ?? "" : "",
+                r.ConventionSigned ? "Oui" : "Non",
+                r.Grade?.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("fr-FR")) ?? "");
+        }
+
+        return csv.ToString();
     }
 
     private static IQueryable<Internship> ApplyInternshipScope(

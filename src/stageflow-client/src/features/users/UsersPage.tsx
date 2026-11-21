@@ -7,7 +7,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faUsers, faShieldHalved, faChalkboardUser, faUserGraduate,
   faUserPlus, faSearch, faTriangleExclamation, faCircle, faGraduationCap,
-  faRotateLeft, faUserPen, faLock, faLockOpen
+  faRotateLeft, faUserPen, faLock, faLockOpen, faKey, faUserSlash, faUserCheck
 } from '@fortawesome/free-solid-svg-icons';
 import { apiClient } from '../../api/client';
 import { UserDto, Track, apiErrorMessage } from '../../types';
@@ -31,6 +31,8 @@ export const UsersPage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [trackId, setTrackId] = useState('');
   const [studentNumber, setStudentNumber] = useState('');
+  const [graduationYear, setGraduationYear] = useState('');
+  const [newGraduationYear, setNewGraduationYear] = useState('');
   const [roleTarget, setRoleTarget] = useState<UserDto | null>(null);
   const [newRole, setNewRole] = useState('Etudiant');
   const [newTrackId, setNewTrackId] = useState('');
@@ -56,11 +58,29 @@ export const UsersPage: React.FC = () => {
       await apiClient.post('/users', {
         email, firstName, lastName, role, password,
         academicTrackId: trackId || null,
-        studentNumber: role === 'Etudiant' ? studentNumber : null
+        studentNumber: role === 'Etudiant' ? studentNumber : null,
+        graduationYear: role === 'Etudiant' && graduationYear ? Number(graduationYear) : null
       });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['users'] }); setOpenModal(false); resetForm(); },
     onError: (err: any) => { setErrorMessage(apiErrorMessage(err, "Erreur lors de la création de l'utilisateur.")); }
+  });
+
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  const activeMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => { await apiClient.put(`/users/${id}/active`, { isActive }); },
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setNotice({ kind: 'ok', text: v.isActive ? 'Compte réactivé.' : 'Compte désactivé : ses sessions ont été fermées.' });
+    },
+    onError: (err: any) => setNotice({ kind: 'error', text: apiErrorMessage(err, "Impossible de modifier l'état du compte.") }),
+  });
+
+  const resetLinkMutation = useMutation({
+    mutationFn: async (id: string) => { await apiClient.post(`/users/${id}/password-reset`); },
+    onSuccess: () => setNotice({ kind: 'ok', text: 'Lien de réinitialisation envoyé par e-mail.' }),
+    onError: (err: any) => setNotice({ kind: 'error', text: apiErrorMessage(err, "Impossible d'envoyer le lien.") }),
   });
 
   const unlockMutation = useMutation({
@@ -72,7 +92,11 @@ export const UsersPage: React.FC = () => {
     mutationFn: async () => {
       if (!roleTarget) return;
       setRoleError('');
-      await apiClient.put(`/users/${roleTarget.id}/role`, { role: newRole, academicTrackId: newTrackId || null });
+      await apiClient.put(`/users/${roleTarget.id}/role`, {
+        role: newRole,
+        academicTrackId: newTrackId || null,
+        graduationYear: newRole === 'Etudiant' && newGraduationYear ? Number(newGraduationYear) : null
+      });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['users'] }); setRoleTarget(null); },
     onError: (err: any) => setRoleError(apiErrorMessage(err, 'Erreur lors de la modification du rôle.'))
@@ -80,12 +104,13 @@ export const UsersPage: React.FC = () => {
 
   const openRoleDialog = (u: UserDto) => {
     setRoleTarget(u); setNewRole(u.role); setNewTrackId(u.academicTrackId || ''); setRoleError('');
+    setNewGraduationYear(u.graduationYear ? String(u.graduationYear) : '');
   };
 
   const resetForm = () => {
     setEmail(''); setFirstName(''); setLastName('');
     setRole('Etudiant'); setPassword(''); setErrorMessage('');
-    setTrackId(''); setStudentNumber('');
+    setTrackId(''); setStudentNumber(''); setGraduationYear('');
   };
 
   const createDisabled = !email || !firstName || !lastName || !password
@@ -145,6 +170,13 @@ export const UsersPage: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {notice && (
+        <div className={`p-3 rounded-lg text-sm flex justify-between items-center ${notice.kind === 'ok' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} aria-label="Fermer" className="font-bold px-2">×</button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="bg-white rounded-2xl p-4 border border-gray-200/80 shadow-sm flex items-center gap-3">
@@ -212,6 +244,7 @@ export const UsersPage: React.FC = () => {
                     <div className="mt-2 text-xs text-gray-500 flex items-center gap-1">
                       <FontAwesomeIcon icon={faGraduationCap} />
                       Filière : <strong>{u.academicTrackCode || trackCode(u.academicTrackId)}</strong>
+                      {u.graduationYear && <span className="ml-1">· Promotion {u.graduationYear}</span>}
                     </div>
                   )}
                   {needsTrack(u.role) && !u.academicTrackId && (
@@ -232,6 +265,17 @@ export const UsersPage: React.FC = () => {
                     className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-lg text-xs font-semibold text-gray-700">
                     <FontAwesomeIcon icon={faUserPen} /> Modifier le rôle / la filière
                   </button>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                    <button onClick={() => resetLinkMutation.mutate(u.id)} disabled={!u.isActive || resetLinkMutation.isPending}
+                      title="Envoie un lien de réinitialisation du mot de passe par e-mail"
+                      className="flex items-center justify-center gap-1 px-2 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-lg text-xs font-semibold text-gray-700 disabled:opacity-50">
+                      <FontAwesomeIcon icon={faKey} /> Lien mot de passe
+                    </button>
+                    <button onClick={() => activeMutation.mutate({ id: u.id, isActive: !u.isActive })} disabled={activeMutation.isPending}
+                      className={`flex items-center justify-center gap-1 px-2 py-1.5 border rounded-lg text-xs font-semibold ${u.isActive ? 'border-red-200 text-red-700 hover:bg-red-50' : 'border-green-200 text-green-700 hover:bg-green-50'}`}>
+                      <FontAwesomeIcon icon={u.isActive ? faUserSlash : faUserCheck} /> {u.isActive ? 'Désactiver' : 'Réactiver'}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -304,6 +348,13 @@ export const UsersPage: React.FC = () => {
                   placeholder="Ex: E1452933" style={{ width: '100%' }} />
               </div>
             )}
+            {role === 'Etudiant' && (
+              <div>
+                <label className="block mb-1 font-semibold text-xs">Promotion (année de sortie) :</label>
+                <input type="number" min={2000} max={2100} value={graduationYear} onChange={(e) => setGraduationYear(e.target.value)}
+                  placeholder="Ex: 2027" style={selectStyle} />
+              </div>
+            )}
           </div>
           <div>
             <label className="block mb-1 font-semibold text-xs">Mot de passe initial :</label>
@@ -347,6 +398,13 @@ export const UsersPage: React.FC = () => {
                 {tracks.map(t => <option key={t.id} value={t.id}>{t.code} — {t.name}</option>)}
               </select>
             </div>
+            {newRole === 'Etudiant' && (
+              <div>
+                <label className="block mb-1 font-semibold text-xs">Promotion (année de sortie) :</label>
+                <input type="number" min={2000} max={2100} value={newGraduationYear} onChange={(e) => setNewGraduationYear(e.target.value)}
+                  placeholder="Ex: 2027" style={selectStyle} />
+              </div>
+            )}
             <div className="text-xs text-gray-500">
               Les sessions ouvertes de cet utilisateur seront fermées : il devra se reconnecter pour obtenir ses nouveaux droits.
             </div>

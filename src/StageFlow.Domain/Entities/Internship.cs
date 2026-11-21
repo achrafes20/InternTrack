@@ -13,6 +13,23 @@ public class Internship : BaseAuditableEntity
     public InternshipStatus Status { get; private set; } = InternshipStatus.Brouillon;
     public string? RejectionReason { get; private set; }
 
+    /// <summary>Motif d'une annulation administrative (statut Annulé).</summary>
+    public string? CancellationReason { get; private set; }
+
+    /// <summary>
+    /// Année universitaire du stage (ex. « 2026-2027 »), déduite de la date de début :
+    /// l'année commence le 1er septembre. Persistée pour filtrer, comparer et archiver par année.
+    /// </summary>
+    public string AcademicYear { get; private set; } = string.Empty;
+
+    public const int AcademicYearStartMonth = 9;
+
+    public static string ComputeAcademicYear(DateTime startDate)
+    {
+        var firstYear = startDate.Month >= AcademicYearStartMonth ? startDate.Year : startDate.Year - 1;
+        return $"{firstYear}-{firstYear + 1}";
+    }
+
     // Tuteur entreprise
     public string CompanySupervisorName { get; private set; } = string.Empty;
     public string CompanySupervisorEmail { get; private set; } = string.Empty;
@@ -35,6 +52,32 @@ public class Internship : BaseAuditableEntity
     public Convention? Convention { get; private set; }
     public Defense? Defense { get; private set; }
     public ICollection<ProgressReport> Reports { get; private set; } = new List<ProgressReport>();
+    public ICollection<InternshipDocument> Documents { get; private set; } = new List<InternshipDocument>();
+
+    /// <summary>
+    /// Statuts d'un dossier « engagé » : un élève ne peut en avoir qu'un seul à la fois
+    /// (les brouillons, dossiers refusés et stages terminés ne comptent pas).
+    /// </summary>
+    public static readonly InternshipStatus[] EngagedStatuses =
+    {
+        InternshipStatus.Propose,
+        InternshipStatus.Valide,
+        InternshipStatus.EnCours,
+        InternshipStatus.SoutenancePlanifiee
+    };
+
+    /// <summary>Statuts pendant lesquels le stage se déroule effectivement (rapports, mémoire).</summary>
+    public static readonly InternshipStatus[] RunningStatuses =
+    {
+        InternshipStatus.EnCours,
+        InternshipStatus.SoutenancePlanifiee
+    };
+
+    /// <summary>Nombre de semaines couvertes par la période (la dernière semaine entamée compte).</summary>
+    public int TotalWeeks => Math.Max(1, (int)Math.Ceiling((Period.EndDate - Period.StartDate).TotalDays / 7.0));
+
+    /// <summary>Premier jour de la semaine n°<paramref name="weekNumber"/> (1 = semaine de début du stage).</summary>
+    public DateTime WeekStart(int weekNumber) => Period.StartDate.AddDays((weekNumber - 1) * 7);
 
     private Internship() { }
 
@@ -58,6 +101,7 @@ public class Internship : BaseAuditableEntity
         Title = title ?? throw new ArgumentNullException(nameof(title));
         SubjectDescription = subjectDescription ?? throw new ArgumentNullException(nameof(subjectDescription));
         Period = new DateRange(startDate, endDate);
+        AcademicYear = ComputeAcademicYear(startDate);
         StudentId = studentId ?? throw new ArgumentNullException(nameof(studentId));
         CompanyId = companyId;
         AcademicTrackId = academicTrackId;
@@ -99,6 +143,7 @@ public class Internship : BaseAuditableEntity
         Title = title;
         SubjectDescription = subjectDescription;
         Period = new DateRange(startDate, endDate);
+        AcademicYear = ComputeAcademicYear(startDate);
         CompanyId = companyId;
         CompanySupervisorName = companySupervisorName;
         CompanySupervisorEmail = companySupervisorEmail;
@@ -112,6 +157,28 @@ public class Internship : BaseAuditableEntity
     }
 
     #region State Machine Workflow
+
+    /// <summary>
+    /// Annulation administrative (abandon, doublon, dossier incohérent). Interdite une fois la soutenance
+    /// planifiée ou le stage terminé : ces dossiers relèvent d'une décision pédagogique (note, jury).
+    /// </summary>
+    public Result Cancel(string currentUserId, string reason)
+    {
+        if (Status is InternshipStatus.SoutenancePlanifiee or InternshipStatus.Termine or InternshipStatus.Annule or InternshipStatus.Refuse)
+            return Result.Failure($"Un dossier au statut '{Status}' ne peut pas être annulé.");
+
+        if (string.IsNullOrWhiteSpace(reason))
+            return Result.Failure("Le motif de l'annulation est obligatoire.");
+
+        if (reason.Length > FieldLimits.RejectionReason)
+            return Result.Failure($"Le motif ne peut dépasser {FieldLimits.RejectionReason} caractères.");
+
+        var prev = Status;
+        Status = InternshipStatus.Annule;
+        CancellationReason = reason.Trim();
+        AddDomainEvent(new InternshipStatusChangedEvent(Id, prev, Status, currentUserId, DateTime.UtcNow));
+        return Result.Success();
+    }
 
     /// <summary>
     /// Après un refus, l'étudiant propriétaire remet son dossier en brouillon pour le corriger

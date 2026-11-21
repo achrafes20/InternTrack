@@ -32,6 +32,7 @@ public class NotificationTests
             .Callback((string to, string _, string _, CancellationToken _) => emails.Add(to))
             .Returns(Task.CompletedTask);
         services.AddSingleton(emailSender.Object);
+        services.AddSingleton(MoroccoTime);
         services.AddSingleton(CreateIdentityMock(Student("std1", "Etudiant Un", Guid.Empty), Teacher("prof1", "Professeur Un")).Object);
         var provider = services.BuildServiceProvider();
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader, Title, Text, Tag } from '@ui5/webcomponents-react';
@@ -17,7 +17,41 @@ interface ConventionVerification {
   isSignedBySchool: boolean;
   isFullySigned: boolean;
   signedAt?: string;
+  signedDocumentSha256?: string;
 }
+
+/** Empreinte SHA-256 calculée localement : le fichier ne quitte jamais l'appareil. */
+const sha256Hex = async (file: File) => {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
+const FingerprintCheck: React.FC<{ expected: string }> = ({ expected }) => {
+  const [result, setResult] = useState<'match' | 'mismatch' | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try { setResult((await sha256Hex(file)) === expected ? 'match' : 'mismatch'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <Text style={{ fontSize: '12px', color: '#666' }}>EMPREINTE DE L'EXEMPLAIRE SIGNÉ (SHA-256)</Text>
+      <code style={{ fontSize: '11px', wordBreak: 'break-all', background: '#f5f5f5', padding: '6px', borderRadius: '4px' }}>{expected}</code>
+      <label style={{ fontSize: '13px' }}>
+        Vérifier un PDF reçu (calcul fait sur votre appareil, le fichier n'est pas envoyé) :
+        <input type="file" accept="application/pdf,.pdf" onChange={onFile} style={{ display: 'block', marginTop: '4px' }} />
+      </label>
+      {busy && <Text>Calcul en cours...</Text>}
+      {result === 'match' && <Text style={{ color: '#107e3e', fontWeight: 'bold' }}>✔ Le document est identique à l'exemplaire signé enregistré.</Text>}
+      {result === 'mismatch' && <Text style={{ color: '#d32f2f', fontWeight: 'bold' }}>✘ Ce document diffère de l'exemplaire signé : il a été modifié ou n'est pas la version signée.</Text>}
+    </div>
+  );
+};
 
 const SignatureLine: React.FC<{ label: string; signed: boolean }> = ({ label, signed }) => (
   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
@@ -93,6 +127,8 @@ export const VerifyConventionPage: React.FC = () => {
                 <Text style={{ fontSize: '12px', color: '#107e3e' }}>Convention complète depuis le {fmt(data.signedAt)}.</Text>
               )}
             </div>
+
+            {data.signedDocumentSha256 && <FingerprintCheck expected={data.signedDocumentSha256} />}
 
             <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #eee', fontSize: '11px', color: '#888', textAlign: 'center' }}>
               Comparez ces informations avec le document présenté : en cas de différence, seules les données de ce portail font foi.

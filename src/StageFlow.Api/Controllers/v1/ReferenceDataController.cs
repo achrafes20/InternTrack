@@ -83,6 +83,42 @@ public class ReferenceDataController : ApiControllerBase
         });
     }
 
+    [HttpPut("/api/v1/companies/{id:guid}")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> UpdateCompany(Guid id, [FromBody] CreateCompanyRequest request, CancellationToken cancellationToken)
+    {
+        var company = await _context.Companies.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        if (company == null)
+            return NotFound(new ProblemDetails { Title = "Entreprise introuvable", Status = 404 });
+
+        var name = request.Name.Trim();
+        if (await _context.Companies.AnyAsync(c => c.Id != id && c.Name.ToLower() == name.ToLower(), cancellationToken))
+            return BadRequest(new ProblemDetails { Title = "Entreprise invalide", Detail = "Une autre entreprise porte déjà ce nom.", Status = 400 });
+
+        company.Update(
+            name,
+            request.Industry ?? string.Empty,
+            request.City.Trim(),
+            request.Address ?? string.Empty,
+            request.ContactEmail.Trim(),
+            request.ContactPhone,
+            request.Website);
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            company.Id,
+            company.Name,
+            company.Industry,
+            company.City,
+            company.Address,
+            company.ContactEmail,
+            company.ContactPhone,
+            company.Website
+        });
+    }
+
     [HttpGet("/api/v1/tracks")]
     [AllowAnonymous]
     public async Task<IActionResult> GetTracks(CancellationToken cancellationToken)

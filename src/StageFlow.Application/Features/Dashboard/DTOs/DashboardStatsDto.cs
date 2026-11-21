@@ -8,7 +8,18 @@ public record DashboardStatsDto(
     List<StatusCountDto> StatusDistribution,
     List<CompanyCountDto> TopCompanies,
     List<TrackCountDto> InternshipsByTrack,
-    List<UpcomingDefenseDto> UpcomingDefenses);
+    List<UpcomingDefenseDto> UpcomingDefenses,
+    string? AcademicYear = null,
+    List<YearlyStatDto>? YearlyStats = null);
+
+/// <summary>Bilan d'une année universitaire (sur le périmètre de l'utilisateur).</summary>
+public record YearlyStatDto(
+    string AcademicYear,
+    int Total,
+    int InProgress,
+    int Completed,
+    int Cancelled,
+    decimal? AverageFinalGrade);
 
 public record StatusCountDto(string Status, int Count);
 public record CompanyCountDto(string CompanyName, int Count);

@@ -15,7 +15,15 @@ public interface IDefenseService
     Task<Result<DefenseDto>> ScheduleDefenseAsync(ScheduleDefenseCommand command, string currentUserId, CancellationToken cancellationToken);
     Task<ConflictCheckResultDto> CheckConflictAsync(CheckConflictRequest request, CancellationToken cancellationToken);
     Task<Result> RecordGradeAsync(Guid defenseId, RecordGradeCommand command, string currentUserId, CancellationToken cancellationToken);
-    Task<List<TeacherDto>> GetTeachersAsync(CancellationToken cancellationToken);
+    Task<Result> CorrectGradeAsync(Guid defenseId, CorrectGradeCommand command, string currentUserId, CancellationToken cancellationToken);
+    Task<Result> SubmitEvaluationAsync(Guid defenseId, SubmitEvaluationCommand command, string teacherId, CancellationToken cancellationToken);
+    Task<bool> IsJuryPresidentAsync(Guid defenseId, string userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Enseignants actifs. Avec <paramref name="trackId"/> : ceux de la filière et les enseignants transversaux
+    /// (sans filière de rattachement), seuls habilités à encadrer un stage de cette filière.
+    /// </summary>
+    Task<List<TeacherDto>> GetTeachersAsync(Guid? trackId, CancellationToken cancellationToken);
 }
 
 public class DefenseService : IDefenseService
@@ -34,14 +42,52 @@ public class DefenseService : IDefenseService
         _identityService = identityService;
     }
 
-    public async Task<List<TeacherDto>> GetTeachersAsync(CancellationToken cancellationToken)
+    public async Task<List<TeacherDto>> GetTeachersAsync(Guid? trackId, CancellationToken cancellationToken)
     {
         var users = await _identityService.GetUsersInRolesAsync(TeacherRoles, cancellationToken);
         return users
             .Where(u => u.IsActive)
+            .Where(u => !trackId.HasValue || u.AcademicTrackId == null || u.AcademicTrackId == trackId.Value)
             .OrderBy(u => u.LastName).ThenBy(u => u.FirstName)
             .Select(u => new TeacherDto(u.Id, u.FullName, u.Email, u.Role, u.AcademicTrackId))
             .ToList();
+    }
+
+    public async Task<bool> IsJuryPresidentAsync(Guid defenseId, string userId, CancellationToken cancellationToken)
+        => await _context.DefenseJuryMembers.AsNoTracking()
+            .AnyAsync(m => m.DefenseId == defenseId && m.TeacherId == userId && m.Role == DefenseRole.President, cancellationToken);
+
+    public async Task<Result> SubmitEvaluationAsync(Guid defenseId, SubmitEvaluationCommand command, string teacherId, CancellationToken cancellationToken)
+    {
+        var defense = await _context.Defenses
+            .Include(d => d.JuryMembers)
+            .Include(d => d.Evaluations)
+            .FirstOrDefaultAsync(d => d.Id == defenseId, cancellationToken);
+
+        if (defense == null)
+            return Result.Failure("Soutenance introuvable.");
+
+        var result = defense.SubmitEvaluation(teacherId, command.Grade, command.Comment, DateTime.UtcNow);
+        if (result.IsFailure)
+            return result;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<Result> CorrectGradeAsync(Guid defenseId, CorrectGradeCommand command, string currentUserId, CancellationToken cancellationToken)
+    {
+        var defense = await _context.Defenses.FirstOrDefaultAsync(d => d.Id == defenseId, cancellationToken);
+        if (defense == null)
+            return Result.Failure("Soutenance introuvable.");
+
+        // L'ancienne et la nouvelle note sont tracées par le journal d'audit (immuable).
+        var result = defense.CorrectGrade(command.Grade, command.Comments, command.Reason, DateTime.UtcNow, currentUserId);
+        if (result.IsFailure)
+            return result;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Result.Success();
     }
 
     public async Task<List<DefenseDto>> GetAllDefensesAsync(string userId, string role, Guid? academicTrackId, CancellationToken cancellationToken)
@@ -49,6 +95,7 @@ public class DefenseService : IDefenseService
         var query = _context.Defenses
             .Include(d => d.Internship)
             .Include(d => d.JuryMembers)
+            .Include(d => d.Evaluations)
             .AsNoTracking()
             .AsQueryable();
 
@@ -79,7 +126,10 @@ public class DefenseService : IDefenseService
             .ToListAsync(cancellationToken);
 
         var names = await _identityService.GetUserNamesAsync(defenses.Select(d => d.Internship.StudentId).Distinct(), cancellationToken);
-        return defenses.Select(d => MapToDto(d, d.Internship, names)).ToList();
+
+        // Les évaluations individuelles du jury restent confidentielles pour l'élève : il ne voit que la note finale.
+        var includeEvaluations = role != UserRole.Etudiant;
+        return defenses.Select(d => MapToDto(d, d.Internship, names, includeEvaluations: includeEvaluations)).ToList();
     }
 
     public async Task<Result<DefenseDto>> GetDefenseByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -87,6 +137,7 @@ public class DefenseService : IDefenseService
         var defense = await _context.Defenses
             .Include(d => d.Internship)
             .Include(d => d.JuryMembers)
+            .Include(d => d.Evaluations)
             .AsNoTracking()
             .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
 
@@ -214,7 +265,7 @@ public class DefenseService : IDefenseService
         if (defense == null)
             return Result.Failure("Soutenance introuvable.");
 
-        var grading = defense.RecordGrade(command.Grade, command.Comments, DateTime.UtcNow);
+        var grading = defense.RecordGrade(command.Grade, command.Comments, DateTime.UtcNow, currentUserId);
         if (grading.IsFailure)
             return grading;
 
@@ -326,8 +377,16 @@ public class DefenseService : IDefenseService
         Defense d,
         Internship internship,
         IReadOnlyDictionary<string, string> names,
-        IEnumerable<DefenseJuryMember>? juryMembers = null)
+        IEnumerable<DefenseJuryMember>? juryMembers = null,
+        bool includeEvaluations = true)
     {
+        var evaluations = includeEvaluations
+            ? d.Evaluations
+                .OrderBy(e => e.TeacherFullName)
+                .Select(e => new DefenseEvaluationDto(e.TeacherId, e.TeacherFullName, e.Grade, e.Comment, e.LastModifiedAt ?? e.CreatedAt))
+                .ToList()
+            : new List<DefenseEvaluationDto>();
+
         return new DefenseDto(
             d.Id,
             d.InternshipId,
@@ -342,6 +401,11 @@ public class DefenseService : IDefenseService
             (juryMembers ?? d.JuryMembers)
                 .OrderBy(m => m.Role)
                 .Select(m => new JuryMemberDto(m.Id, m.TeacherId, m.TeacherFullName, m.Role, m.Role.ToString()))
-                .ToList());
+                .ToList(),
+            evaluations,
+            includeEvaluations ? d.AverageEvaluation : null,
+            d.GradedAt,
+            d.GradeCorrectionReason,
+            d.GradeCorrectedAt);
     }
 }

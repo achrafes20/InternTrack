@@ -35,6 +35,7 @@ public class PostgreSqlApiTests
             builder.UseSetting("Database:SeedDemoData", "true");
             builder.UseSetting("Smtp:Enabled", "false");
             builder.UseSetting("Security:MaxFailedLoginAttempts", maxFailedLoginAttempts.ToString());
+            builder.UseSetting("Storage:RootPath", Path.Combine(Path.GetTempPath(), "stageflow-tests", Guid.NewGuid().ToString("N")));
         });
     }
 

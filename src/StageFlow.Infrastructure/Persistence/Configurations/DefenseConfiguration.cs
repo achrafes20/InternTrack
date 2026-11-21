@@ -23,6 +23,19 @@ public class DefenseConfiguration : IEntityTypeConfiguration<Defense>
         builder.Property(d => d.Comments)
             .HasMaxLength(FieldLimits.DefenseComments);
 
+        builder.Property(d => d.TutorEvaluationTokenHash)
+            .HasMaxLength(FieldLimits.TokenHash);
+
+        builder.HasIndex(d => d.TutorEvaluationTokenHash)
+            .IsUnique()
+            .HasFilter("\"TutorEvaluationTokenHash\" IS NOT NULL");
+
+        builder.Property(d => d.GradedBy)
+            .HasMaxLength(FieldLimits.UserId);
+
+        builder.Property(d => d.GradeCorrectionReason)
+            .HasMaxLength(FieldLimits.RejectionReason);
+
         builder.HasOne(d => d.Internship)
             .WithOne(i => i.Defense)
             .HasForeignKey<Defense>(d => d.InternshipId)

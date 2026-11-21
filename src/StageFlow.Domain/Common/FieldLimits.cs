@@ -43,6 +43,13 @@ public static class FieldLimits
 
     public const int ConventionNumber = 50;
     public const int VerificationToken = 64;
+    public const int TokenHash = 64;
+    public const int Sha256 = 64;
+    public const int AcademicYear = 9;
+
+    public const int FileName = 200;
+    public const int StorageKey = 300;
+    public const int ContentType = 100;
 
     /// <summary>Tronque une valeur produite par le système (ex. sortie d'IA) à la taille de sa colonne.</summary>
     public static string Truncate(string value, int maxLength)

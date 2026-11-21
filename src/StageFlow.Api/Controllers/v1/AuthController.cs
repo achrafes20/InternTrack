@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -6,6 +7,12 @@ using StageFlow.Application.Common.Interfaces;
 namespace StageFlow.Api.Controllers.v1;
 
 public record LoginRequest(string Email, string Password);
+
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+public record ForgotPasswordRequest(string Email);
+
+public record ResetPasswordRequest(string Email, string Token, string NewPassword);
 
 public class AuthController : ApiControllerBase
 {
@@ -82,6 +89,43 @@ public class AuthController : ApiControllerBase
         }
 
         DeleteRefreshTokenCookie();
+        return NoContent();
+    }
+
+    /// <summary>Changement de mot de passe par l'utilisateur connecté. Les autres sessions sont fermées.</summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var result = await _identityService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Changement impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Demande de réinitialisation. La réponse est toujours 204 : elle ne révèle pas si l'email correspond à un compte.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _identityService.RequestPasswordResetAsync(request.Email.Trim(), cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _identityService.ResetPasswordAsync(request.Email.Trim(), request.Token, request.NewPassword, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Réinitialisation impossible", Detail = result.Error, Status = 400 });
+
         return NoContent();
     }
 

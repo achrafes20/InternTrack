@@ -18,7 +18,10 @@ public record ConventionPdfModel(
     bool IsSignedBySchool,
     DateTime? SignedAt,
     string VerificationUrl,
-    byte[] QrCodeBytes);
+    byte[] QrCodeBytes,
+    string? CompanySignerName = null,
+    string? SignedAtLabel = null,
+    string? GeneratedAtLabel = null);
 
 public interface IPdfGenerator
 {

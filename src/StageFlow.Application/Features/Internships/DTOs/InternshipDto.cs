@@ -12,6 +12,8 @@ public class InternshipDto
     public InternshipStatus Status { get; set; }
     public string StatusName { get; set; } = string.Empty;
     public string? RejectionReason { get; set; }
+    public string? CancellationReason { get; set; }
+    public string AcademicYear { get; set; } = string.Empty;
     public string StudentId { get; set; } = string.Empty;
     public string? StudentName { get; set; }
     public string? AcademicSupervisorId { get; set; }
@@ -25,6 +27,8 @@ public class InternshipDto
     public string AcademicTrackCode { get; set; } = string.Empty;
     public Guid? InternshipOfferId { get; set; }
     public ConventionStatusDto? Convention { get; set; }
+    public List<InternshipDocumentDto> Documents { get; set; } = new();
+    public int TotalWeeks { get; set; }
 }
 
 public record ConventionStatusDto(
@@ -32,7 +36,16 @@ public record ConventionStatusDto(
     bool IsSignedByStudent,
     bool IsSignedByCompany,
     bool IsSignedBySchool,
-    DateTime? SignedAt);
+    DateTime? SignedAt,
+    string? CompanySignerName = null,
+    DateTime? CompanySigningLinkExpiresAt = null);
+
+public record InternshipDocumentDto(
+    Guid Id,
+    string Kind,
+    string FileName,
+    long SizeBytes,
+    DateTime UploadedAt);
 
 public class ProposeInternshipCommand
 {
@@ -63,4 +76,9 @@ public class UpdateInternshipDraftCommand
 public class RejectInternshipCommand
 {
     public string RejectionReason { get; set; } = string.Empty;
+}
+
+public class CancelInternshipCommand
+{
+    public string Reason { get; set; } = string.Empty;
 }

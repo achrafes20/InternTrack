@@ -109,3 +109,27 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/** Télécharge un fichier protégé (le jeton d'accès est ajouté par l'intercepteur) et l'enregistre localement. */
+export const downloadFile = async (url: string, fallbackName: string) => {
+  const response = await api.get(url, { responseType: 'blob' });
+  const disposition: string = response.headers['content-disposition'] || '';
+  const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+  const fileName = match ? decodeURIComponent(match[1] || match[2]) : fallbackName;
+
+  const objectUrl = window.URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.setAttribute('download', fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+};
+
+/** Dépose un fichier en multipart/form-data (champ « file »). */
+export const uploadFile = (url: string, file: File) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+};

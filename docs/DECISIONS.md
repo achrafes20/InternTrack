@@ -38,3 +38,29 @@ Ce document consigne les décisions techniques et de modélisation prises de man
 
 ### ADR 007 : Validation des entrées
 - **Décision** : FluentValidation, exécuté par un filtre MVC global. Les longueurs maximales proviennent de `FieldLimits` (domaine), également utilisé par la configuration EF : la validation et le schéma ne peuvent pas diverger. Les textes produits par le système (résumé IA) sont tronqués à la taille de leur colonne.
+
+### ADR 008 : Règles de déroulement du stage
+- **Un seul dossier engagé par élève** : contrôlé à la proposition, à la soumission et à la validation. Les brouillons, dossiers refusés et stages terminés ne comptent pas.
+- **Période** : la date de début ne peut pas être passée (dans le fuseau de l'école) ; la durée est comprise entre `Internships:MinDurationWeeks` (8) et `MaxDurationWeeks` (52) ; si le stage répond à une offre, sa durée doit correspondre à celle de l'offre à `OfferDurationToleranceWeeks` (2) près. Ces règles sont revérifiées à la soumission d'un brouillon ancien.
+- **Rapports** : uniquement pendant le stage (en cours ou en soutenance), pour une semaine comprise dans la période et déjà commencée ; modifiables par l'élève tant qu'ils ne sont pas validés. Modifier un rapport efface son résumé IA, devenu obsolète.
+
+### ADR 009 : Notation par le jury
+- Chaque membre interne du jury dépose une évaluation (note et appréciation), révisable jusqu'à l'arrêt de la note finale. L'élève ne voit jamais les évaluations individuelles.
+- La note finale est arrêtée par le président du jury, ou par le responsable de filière ou l'administrateur. La moyenne des évaluations est proposée par défaut.
+- Une note arrêtée n'est plus modifiée par une nouvelle saisie : la **correction** est un acte distinct, réservé au responsable ou à l'administrateur, avec un motif obligatoire. L'ancienne et la nouvelle valeur sont conservées par le journal d'audit.
+
+### ADR 010 : Signature de l'entreprise et documents déposés
+- **Lien de signature** : un jeton aléatoire de 256 bits est envoyé au tuteur entreprise. Seul son hash SHA-256 est stocké, comparé en temps constant ; il expire au bout de 14 jours, sert une seule fois, et un renvoi invalide le précédent. La page publique n'affiche que le strict nécessaire et elle est soumise à une limite de débit.
+- **Signature papier** : l'école ne peut l'enregistrer qu'après le dépôt du scan signé, qui fait office de preuve.
+- **Fichiers** : PDF uniquement, vérifié par sa signature `%PDF-` (et non par l'extension) ; 20 Mo maximum ; nom d'affichage assaini ; stockage sous un nom aléatoire, à l'abri de tout parcours de répertoire (`IFileStorage`, implémentation disque sur volume Docker). Les fichiers sont téléchargés en `attachment`. Un nouveau dépôt du même type remplace le précédent et supprime l'ancien fichier.
+- **Clés DataProtection** persistées (`DataProtection:KeysPath`) : sans cela, les liens de réinitialisation de mot de passe deviendraient invalides à chaque redémarrage du conteneur.
+- **Identifiants** : les `Id` sont générés par le domaine. Ils sont donc déclarés `ValueGeneratedNever`, faute de quoi EF prendrait une entité ajoutée via une navigation pour une ligne existante.
+
+### ADR 011 : Données héritées et pilotage
+- Les règles de gestion ne réécrivent jamais les données existantes de façon automatique. Un **rapport d'anomalies** (`GET /api/v1/anomalies`) les détecte et indique la correction à apporter ; c'est un humain qui décide, notamment via l'**annulation administrative** (statut `Annule`, motif obligatoire, interdite une fois la soutenance planifiée).
+- L'**année universitaire** est persistée (`Internships.AcademicYear`), calculée à partir de la date de début : l'année commence le 1er septembre. Elle sert aux filtres, au bilan annuel et à l'export. La **promotion** est l'année de sortie de l'élève (`AspNetUsers.GraduationYear`).
+- L'export CSV utilise le séparateur `;` et un BOM UTF-8 (pour Excel en français). Les cellules commençant par `= + - @` sont neutralisées (injection CSV).
+
+### ADR 012 : Intégrité de la convention et signature qualifiée
+- **Aujourd'hui** : chaque partie signe par une attestation tracée (compte authentifié, lien à usage unique ou scan déposé). À la dernière signature, le PDF est figé et son empreinte SHA-256 est publiée. Cela garantit l'intégrité du document (toute modification est détectable), mais **pas** la valeur d'une signature électronique qualifiée au sens de la loi 43-20 (Maroc) ou du règlement eIDAS.
+- **Pour une signature qualifiée**, il faut un prestataire de services de confiance (Barid eSign, Yousign, DocuSign…), un contrat, des clés d'API et une décision juridique de l'établissement. Le point d'intégration est l'exemplaire figé : envoi du PDF figé au prestataire, réception par webhook du PDF signé, puis remplacement de l'exemplaire et de son empreinte. Cette intégration n'est pas implémentée : elle ne peut pas être testée sans compte chez un prestataire.

@@ -23,6 +23,7 @@ public class SessionAndWorkflowIntegrationTests : IClassFixture<WebApplicationFa
             builder.UseSetting("Database:AutoMigrate", "false");
             builder.UseSetting("Database:SeedDemoData", "true");
             builder.UseSetting("Smtp:Enabled", "false");
+            builder.UseSetting("Storage:RootPath", Path.Combine(Path.GetTempPath(), "stageflow-tests", Guid.NewGuid().ToString("N")));
         });
     }
 
@@ -53,7 +54,9 @@ public class SessionAndWorkflowIntegrationTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task RefreshToken_IsRotated_AndReplayRevokesTheWholeSession()
     {
-        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        // Sans période de tolérance multi-onglets : tout rejeu d'un token remplacé est traité comme un vol.
+        var noGrace = _factory.WithWebHostBuilder(b => b.UseSetting("JwtSettings:RefreshTokenReuseGraceSeconds", "0"));
+        var client = noGrace.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
         var login = await client.PostAsJsonAsync("/api/v1/auth/login", new { email = "prof.tazi@ensa.ma", password = "Prof@123456" });
         var firstCookie = ExtractRefreshCookie(login);
 

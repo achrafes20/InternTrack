@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StageFlow.Application.Common.Models;
 using StageFlow.Application.Common.Security;
 using StageFlow.Application.Features.Dashboard.Services;
 
@@ -18,14 +19,31 @@ public class DashboardController : ApiControllerBase
     }
 
     [HttpGet("stats")]
-    public async Task<IActionResult> GetDashboardStats(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetDashboardStats([FromQuery] string? academicYear, CancellationToken cancellationToken)
     {
         var stats = await _dashboardService.GetDashboardStatsAsync(
             _accessControl.UserId!,
             _accessControl.Role,
             _accessControl.AcademicTrackId,
-            cancellationToken);
+            cancellationToken,
+            academicYear);
 
         return Ok(stats);
+    }
+
+    /// <summary>Export CSV (Excel) des stages du périmètre de l'utilisateur, éventuellement filtré par année universitaire.</summary>
+    [HttpGet("export")]
+    [Authorize(Policy = "RequireSupervisorRole")]
+    public async Task<IActionResult> Export([FromQuery] string? academicYear, CancellationToken cancellationToken)
+    {
+        var csv = await _dashboardService.ExportCsvAsync(
+            _accessControl.UserId!,
+            _accessControl.Role,
+            _accessControl.AcademicTrackId,
+            academicYear,
+            cancellationToken);
+
+        var suffix = string.IsNullOrWhiteSpace(academicYear) ? "toutes-annees" : academicYear;
+        return File(CsvBuilder.ToExcelBytes(csv), "text/csv; charset=utf-8", $"stages-{suffix}.csv");
     }
 }

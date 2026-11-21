@@ -157,7 +157,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.AcademicTrack", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Code")
@@ -204,7 +203,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Action")
@@ -252,7 +250,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.Company", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Address")
@@ -323,8 +320,21 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.Convention", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CompanySignedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CompanySignerName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime?>("CompanySigningTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CompanySigningTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ConventionNumber")
                         .IsRequired()
@@ -358,6 +368,14 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("SignedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("SignedDocumentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SignedDocumentStorageKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
                     b.Property<string>("VerificationToken")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -370,6 +388,10 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanySigningTokenHash")
+                        .IsUnique()
+                        .HasFilter("\"CompanySigningTokenHash\" IS NOT NULL");
 
                     b.HasIndex("ConventionNumber")
                         .IsUnique();
@@ -386,7 +408,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.Defense", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Classroom")
@@ -414,6 +435,20 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                         .HasPrecision(4, 2)
                         .HasColumnType("numeric(4,2)");
 
+                    b.Property<DateTime?>("GradeCorrectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GradeCorrectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("GradedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GradedBy")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
                     b.Property<Guid>("InternshipId")
                         .HasColumnType("uuid");
 
@@ -426,6 +461,13 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("TutorEvaluationTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TutorEvaluationTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<uint>("Version")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -437,6 +479,10 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.HasIndex("InternshipId")
                         .IsUnique();
 
+                    b.HasIndex("TutorEvaluationTokenHash")
+                        .IsUnique()
+                        .HasFilter("\"TutorEvaluationTokenHash\" IS NOT NULL");
+
                     b.HasIndex("Classroom", "ScheduledAt");
 
                     b.HasIndex("ScheduledAt", "EndsAt");
@@ -444,10 +490,61 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Defenses", (string)null);
                 });
 
+            modelBuilder.Entity("StageFlow.Domain.Entities.DefenseEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("DefenseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Grade")
+                        .HasPrecision(4, 2)
+                        .HasColumnType("numeric(4,2)");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TeacherFullName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("TeacherId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefenseId", "TeacherId")
+                        .IsUnique();
+
+                    b.ToTable("DefenseEvaluations", (string)null);
+                });
+
             modelBuilder.Entity("StageFlow.Domain.Entities.DefenseJuryMember", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("DefenseId")
@@ -483,7 +580,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.Internship", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("AcademicSupervisorId")
@@ -492,6 +588,15 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("AcademicTrackId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AcademicYear")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
@@ -557,6 +662,8 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AcademicTrackId");
 
+                    b.HasIndex("AcademicYear");
+
                     b.HasIndex("CompanyId");
 
                     b.HasIndex("InternshipOfferId");
@@ -568,10 +675,71 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Internships", (string)null);
                 });
 
+            modelBuilder.Entity("StageFlow.Domain.Entities.InternshipDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("InternshipId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("InternshipId", "Kind");
+
+                    b.ToTable("InternshipDocuments", (string)null);
+                });
+
             modelBuilder.Entity("StageFlow.Domain.Entities.InternshipOffer", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("AcademicTrackId")
@@ -647,7 +815,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.ProgressReport", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("ActivitiesPerformed")
@@ -717,7 +884,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -767,7 +933,6 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("StageFlow.Domain.Entities.ReportComment", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("AuthorFullName")
@@ -841,6 +1006,9 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("GraduationYear")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -970,6 +1138,17 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.Navigation("Internship");
                 });
 
+            modelBuilder.Entity("StageFlow.Domain.Entities.DefenseEvaluation", b =>
+                {
+                    b.HasOne("StageFlow.Domain.Entities.Defense", "Defense")
+                        .WithMany("Evaluations")
+                        .HasForeignKey("DefenseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Defense");
+                });
+
             modelBuilder.Entity("StageFlow.Domain.Entities.DefenseJuryMember", b =>
                 {
                     b.HasOne("StageFlow.Domain.Entities.Defense", "Defense")
@@ -1031,6 +1210,17 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("StageFlow.Domain.Entities.InternshipDocument", b =>
+                {
+                    b.HasOne("StageFlow.Domain.Entities.Internship", "Internship")
+                        .WithMany("Documents")
+                        .HasForeignKey("InternshipId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Internship");
+                });
+
             modelBuilder.Entity("StageFlow.Domain.Entities.InternshipOffer", b =>
                 {
                     b.HasOne("StageFlow.Domain.Entities.AcademicTrack", "AcademicTrack")
@@ -1088,6 +1278,8 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("StageFlow.Domain.Entities.Defense", b =>
                 {
+                    b.Navigation("Evaluations");
+
                     b.Navigation("JuryMembers");
                 });
 
@@ -1096,6 +1288,8 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
                     b.Navigation("Convention");
 
                     b.Navigation("Defense");
+
+                    b.Navigation("Documents");
 
                     b.Navigation("Reports");
                 });

@@ -36,5 +36,14 @@ public class CreateReportCommand
     public string NextWeekGoals { get; set; } = string.Empty;
 }
 
+public class UpdateReportCommand
+{
+    public string Title { get; set; } = string.Empty;
+    public string ActivitiesPerformed { get; set; } = string.Empty;
+    public string SkillsAcquired { get; set; } = string.Empty;
+    public string DifficultiesEncountered { get; set; } = string.Empty;
+    public string NextWeekGoals { get; set; } = string.Empty;
+}
+
 public record AddCommentCommand(
     string Content);

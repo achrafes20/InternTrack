@@ -8,10 +8,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFileLines, faComment, faRobot, faCheck, faPlus,
   faChevronDown, faChevronUp, faUser, faClipboardList,
-  faTriangleExclamation, faCalendarDays, faBuildingColumns, faFolderOpen
+  faTriangleExclamation, faCalendarDays, faBuildingColumns, faFolderOpen, faPenToSquare
 } from '@fortawesome/free-solid-svg-icons';
 import { apiClient } from '../../api/client';
-import { ProgressReportDto, InternshipDto } from '../../types';
+import { ProgressReportDto, InternshipDto, apiErrorMessage } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
 export const ReportsPage: React.FC = () => {
@@ -61,23 +61,41 @@ export const ReportsPage: React.FC = () => {
     enabled: !!activeInternship || isSupervisorOrHead
   });
 
+  const [editingReportId, setEditingReportId] = useState<string | null>(null);
+
   const submitReportMutation = useMutation({
     mutationFn: async () => {
       if (!activeInternship) return;
       setSubmitError('');
-      await apiClient.post('/reports', {
-        internshipId: activeInternship.id, weekNumber: Number(weekNumber),
+      const content = {
         title: reportTitle, activitiesPerformed: activities, skillsAcquired: skills,
         difficultiesEncountered: difficulties, nextWeekGoals: nextGoals
-      });
+      };
+      if (editingReportId) {
+        await apiClient.put(`/reports/${editingReportId}`, content);
+      } else {
+        await apiClient.post('/reports', { internshipId: activeInternship.id, weekNumber: Number(weekNumber), ...content });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports'] });
-      setOpenSubmitDialog(false); setReportTitle(''); setActivities(''); setSkills('');
-      setNextGoals(''); setDifficulties(''); setSubmitError('');
+      closeSubmitDialog();
     },
-    onError: (err: any) => { setSubmitError(err.response?.data?.detail || 'Erreur lors du dépôt du rapport.'); }
+    onError: (err: any) => { setSubmitError(apiErrorMessage(err, 'Erreur lors du dépôt du rapport.')); }
   });
+
+  const closeSubmitDialog = () => {
+    setOpenSubmitDialog(false); setEditingReportId(null); setReportTitle(''); setActivities(''); setSkills('');
+    setNextGoals(''); setDifficulties(''); setSubmitError('');
+  };
+
+  const openEditDialog = (r: ProgressReportDto) => {
+    setEditingReportId(r.id);
+    setWeekNumber(r.weekNumber);
+    setReportTitle(r.title); setActivities(r.activitiesPerformed); setSkills(r.skillsAcquired);
+    setDifficulties(r.difficultiesEncountered); setNextGoals(r.nextWeekGoals); setSubmitError('');
+    setOpenSubmitDialog(true);
+  };
 
   const validateReportMutation = useMutation({
     mutationFn: async (reportId: string) => { await apiClient.post(`/reports/${reportId}/validate`); },
@@ -306,11 +324,25 @@ export const ReportsPage: React.FC = () => {
                           <Button design="Default" onClick={() => { setSelectedReport(r); setOpenCommentDialog(true); }}>
                             <FontAwesomeIcon icon={faComment} className="mr-1" /> Commenter
                           </Button>
+                          <Button design="Transparent" onClick={() => handleSummarizeWithAi(r)}>
+                            <FontAwesomeIcon icon={faRobot} className="mr-1" /> Résumé IA
+                          </Button>
                         </>
                       )}
-                      <Button design="Transparent" onClick={() => handleSummarizeWithAi(r)}>
-                        <FontAwesomeIcon icon={faRobot} className="mr-1" /> Résumé IA
-                      </Button>
+                      {isStudent && (
+                        <>
+                          {!isValidated && (
+                            <Button design="Default" onClick={() => openEditDialog(r)}>
+                              <FontAwesomeIcon icon={faPenToSquare} className="mr-1" /> Modifier
+                            </Button>
+                          )}
+                          {commentsCount > 0 && (
+                            <Button design="Default" onClick={() => { setSelectedReport(r); setOpenCommentDialog(true); }}>
+                              <FontAwesomeIcon icon={faComment} className="mr-1" /> Répondre
+                            </Button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -321,16 +353,16 @@ export const ReportsPage: React.FC = () => {
       )}
 
       {/* Submit Report Dialog */}
-      <Dialog open={openSubmitDialog} headerText="Nouveau rapport hebdomadaire"
+      <Dialog open={openSubmitDialog} headerText={editingReportId ? `Modifier le rapport — semaine ${weekNumber}` : "Nouveau rapport hebdomadaire"}
         footer={
           <Bar endContent={
             <>
-              <Button design="Transparent" onClick={() => setOpenSubmitDialog(false)}>Annuler</Button>
+              <Button design="Transparent" onClick={closeSubmitDialog}>Annuler</Button>
               <Button design="Emphasized"
                 disabled={!activities.trim() || submitReportMutation.isPending}
                 onClick={() => submitReportMutation.mutate()}
               >
-                {submitReportMutation.isPending ? 'Enregistrement...' : 'Déposer le rapport'}
+                {submitReportMutation.isPending ? 'Enregistrement...' : editingReportId ? 'Enregistrer les modifications' : 'Déposer le rapport'}
               </Button>
             </>
           } />
@@ -342,8 +374,13 @@ export const ReportsPage: React.FC = () => {
           )}
           <div>
             <label className="block mb-1 font-semibold text-sm">Numéro de semaine :</label>
-            <Input type="Number" value={weekNumber.toString()}
+            <Input type="Number" value={weekNumber.toString()} disabled={!!editingReportId}
               onInput={(e: any) => setWeekNumber(Number(e.target.value))} style={{ width: '100%' }} />
+            {activeInternship?.totalWeeks && (
+              <div className="text-xs text-gray-500 mt-1">
+                Semaines 1 à {activeInternship.totalWeeks} ; seule une semaine déjà commencée peut faire l'objet d'un rapport.
+              </div>
+            )}
           </div>
           <div>
             <label className="block mb-1 font-semibold text-sm">Titre du rapport (Optionnel) :</label>
@@ -374,7 +411,7 @@ export const ReportsPage: React.FC = () => {
       </Dialog>
 
       {/* Comment Dialog */}
-      <Dialog open={openCommentDialog} headerText={`Commentaire pédagogique — Semaine ${selectedReport?.weekNumber}`}
+      <Dialog open={openCommentDialog} headerText={isStudent ? `Répondre à votre encadrant — Semaine ${selectedReport?.weekNumber}` : `Commentaire pédagogique — Semaine ${selectedReport?.weekNumber}`}
         footer={
           <Bar endContent={
             <>
@@ -389,7 +426,7 @@ export const ReportsPage: React.FC = () => {
       >
         <div className="flex flex-col gap-4 p-4" style={{ minWidth: '400px' }}>
           <div>
-            <label className="block mb-1 font-semibold text-sm">Votre feedback :</label>
+            <label className="block mb-1 font-semibold text-sm">{isStudent ? 'Votre réponse :' : 'Votre feedback :'}</label>
             <TextArea rows={4} value={commentText} onInput={(e: any) => setCommentText(e.target.value)}
               placeholder="Conseils, remarques sur l'avancement..." style={{ width: '100%' }} />
           </div>

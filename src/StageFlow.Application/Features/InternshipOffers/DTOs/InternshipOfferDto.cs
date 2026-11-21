@@ -26,3 +26,15 @@ public record CreateInternshipOfferCommand(
     Guid CompanyId,
     Guid AcademicTrackId);
 
+/// <summary>Modification d'une offre (l'entreprise et la filière d'une offre publiée ne changent pas).</summary>
+public record UpdateInternshipOfferCommand(
+    string Title,
+    string Description,
+    string RequiredSkills,
+    string City,
+    int DurationInWeeks,
+    decimal? MonthlyStipend,
+    DateTime ExpirationDate);
+
+public record SetOfferActiveCommand(bool IsActive);
+

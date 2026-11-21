@@ -13,7 +13,23 @@ public record DefenseDto(
     string Classroom,
     decimal? FinalGrade,
     string? Comments,
-    List<JuryMemberDto> JuryMembers);
+    List<JuryMemberDto> JuryMembers,
+    List<DefenseEvaluationDto>? Evaluations = null,
+    decimal? AverageEvaluation = null,
+    DateTime? GradedAt = null,
+    string? GradeCorrectionReason = null,
+    DateTime? GradeCorrectedAt = null);
+
+public record DefenseEvaluationDto(
+    string TeacherId,
+    string TeacherFullName,
+    decimal Grade,
+    string? Comment,
+    DateTime SubmittedAt);
+
+public record SubmitEvaluationCommand(decimal Grade, string? Comment);
+
+public record CorrectGradeCommand(decimal Grade, string? Comments, string Reason);
 
 public record JuryMemberDto(
     Guid Id,

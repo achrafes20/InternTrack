@@ -23,6 +23,7 @@ public class AuthIntegrationTests : IClassFixture<WebApplicationFactory<Program>
             builder.UseSetting("Database:AutoMigrate", "false");
             builder.UseSetting("Database:SeedDemoData", "true");
             builder.UseSetting("Smtp:Enabled", "false");
+            builder.UseSetting("Storage:RootPath", Path.Combine(Path.GetTempPath(), "stageflow-tests", Guid.NewGuid().ToString("N")));
         });
     }
 

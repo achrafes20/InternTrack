@@ -65,6 +65,7 @@ public class NotificationBackgroundService : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var emailSender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
         var identityService = scope.ServiceProvider.GetRequiredService<IIdentityService>();
+        var timeZone = scope.ServiceProvider.GetRequiredService<ITimeZoneService>();
 
         var upcomingDefenses = await context.Defenses
             .AsNoTracking()
@@ -80,7 +81,7 @@ public class NotificationBackgroundService : BackgroundService
             var body = $@"
                 <h3>Rappel de soutenance</h3>
                 <p>La soutenance du stage <strong>{System.Net.WebUtility.HtmlEncode(defense.Internship.Title)}</strong> aura lieu le :</p>
-                <p><strong>Date &amp; heure :</strong> {defense.ScheduledAt:dd/MM/yyyy à HH:mm} UTC (durée : {defense.DurationMinutes} min)</p>
+                <p><strong>Date &amp; heure :</strong> {timeZone.FormatDateTime(defense.ScheduledAt)} (durée : {defense.DurationMinutes} min)</p>
                 <p><strong>Salle :</strong> {System.Net.WebUtility.HtmlEncode(defense.Classroom)}</p>
                 <p>Merci de vous présenter 15 minutes avant le début de la séance.</p>";
 

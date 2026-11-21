@@ -62,3 +62,6 @@ pnpm-debug.log*
 Thumbs.db
 ehthumbs.db
 
+
+## Fichiers déposés en développement local
+App_Data/

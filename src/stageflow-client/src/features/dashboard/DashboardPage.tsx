@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -8,7 +8,8 @@ import {
   faFileLines, faUsers, faGraduationCap, faBriefcase,
   faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
-import { api } from '../../api/client';
+import { api, downloadFile } from '../../api/client';
+import { YearlyStatsCard } from './YearlyStatsCard';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardStats } from '../../types';
 
@@ -72,10 +73,23 @@ export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  const [academicYear, setAcademicYear] = useState('');
+  const [exportError, setExportError] = useState('');
+  const canExport = user?.role !== 'Etudiant';
+
   const { data: stats, isLoading } = useQuery<DashboardStats>({
-    queryKey: ['dashboard-stats'],
-    queryFn: async () => (await api.get('/dashboard/stats')).data,
+    queryKey: ['dashboard-stats', academicYear],
+    queryFn: async () => (await api.get('/dashboard/stats', { params: { academicYear: academicYear || undefined } })).data,
   });
+
+  const handleExport = async () => {
+    try {
+      setExportError('');
+      await downloadFile(`/dashboard/export${academicYear ? `?academicYear=${encodeURIComponent(academicYear)}` : ''}`, 'stages.csv');
+    } catch {
+      setExportError("L'export a échoué.");
+    }
+  };
 
   if (isLoading) return (
     <div className="flex items-center justify-center h-64 text-slate-400">
@@ -88,6 +102,14 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-6">
+
+      <YearlyStatsCard
+        years={stats.yearlyStats ?? []}
+        selected={academicYear}
+        onSelect={setAcademicYear}
+        onExport={canExport ? handleExport : undefined}
+        exportError={exportError}
+      />
 
       {/* Bannière de bienvenue */}
       <div className="rounded-2xl bg-gradient-to-r from-ensa-navy via-ensa-blue to-sky-500 text-white px-8 py-7 flex flex-wrap gap-5 items-center justify-between shadow-elevated">

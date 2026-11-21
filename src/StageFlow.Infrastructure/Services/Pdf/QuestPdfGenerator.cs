@@ -70,14 +70,16 @@ public class QuestPdfGenerator : IPdfGenerator
                     col.Item().PaddingTop(25).Row(signRow =>
                     {
                         SignatureBlock(signRow, "Pour l'Élève Ingénieur", "Signature et mention 'Lu et approuvé'", m.IsSignedByStudent);
-                        SignatureBlock(signRow, "Pour l'Entreprise", "Cachet et signature du tuteur", m.IsSignedByCompany);
+                        SignatureBlock(signRow, "Pour l'Entreprise",
+                            m.CompanySignerName is { Length: > 0 } ? $"Signé par {m.CompanySignerName}" : "Cachet et signature du tuteur",
+                            m.IsSignedByCompany);
                         SignatureBlock(signRow, "Pour l'École (ENSA)", "Le Directeur / Responsable de filière", m.IsSignedBySchool);
                     });
 
                     if (m.SignedAt.HasValue)
                     {
                         col.Item().PaddingTop(10).AlignCenter()
-                            .Text($"Convention signée par les trois parties le {m.SignedAt.Value:dd/MM/yyyy à HH:mm} UTC.")
+                            .Text($"Convention signée par les trois parties le {m.SignedAtLabel ?? m.SignedAt.Value.ToString("dd/MM/yyyy HH:mm") + " UTC"}.")
                             .FontSize(9).FontColor(Colors.Green.Darken3);
                     }
                 });
@@ -85,7 +87,7 @@ public class QuestPdfGenerator : IPdfGenerator
                 page.Footer().AlignCenter().Text(x =>
                 {
                     x.Span("StageFlow ENSA - Document généré le ");
-                    x.Span($"{DateTime.UtcNow:dd/MM/yyyy HH:mm} UTC").Bold();
+                    x.Span(m.GeneratedAtLabel ?? $"{DateTime.UtcNow:dd/MM/yyyy HH:mm} UTC").Bold();
                 });
             });
         }).GeneratePdf();

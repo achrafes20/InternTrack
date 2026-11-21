@@ -27,6 +27,23 @@ public class ConventionConfiguration : IEntityTypeConfiguration<Convention>
         builder.HasIndex(c => c.VerificationToken)
             .IsUnique();
 
+        builder.Property(c => c.SignedDocumentStorageKey)
+            .HasMaxLength(FieldLimits.StorageKey);
+
+        builder.Property(c => c.SignedDocumentSha256)
+            .HasMaxLength(FieldLimits.Sha256);
+
+        builder.Property(c => c.CompanySignerName)
+            .HasMaxLength(FieldLimits.PersonName);
+
+        builder.Property(c => c.CompanySigningTokenHash)
+            .HasMaxLength(FieldLimits.TokenHash);
+
+        // Recherche d'une convention à partir du lien de signature envoyé à l'entreprise.
+        builder.HasIndex(c => c.CompanySigningTokenHash)
+            .IsUnique()
+            .HasFilter("\"CompanySigningTokenHash\" IS NOT NULL");
+
         builder.HasOne(c => c.Internship)
             .WithOne(i => i.Convention)
             .HasForeignKey<Convention>(c => c.InternshipId)

@@ -18,4 +18,5 @@ public record UserDto(
     Guid? AcademicTrackId,
     bool IsActive = true,
     string? AcademicTrackCode = null,
-    bool IsLockedOut = false);
+    bool IsLockedOut = false,
+    int? GraduationYear = null);

@@ -79,11 +79,26 @@ public class ReportsController : ApiControllerBase
         return Ok(result.Value);
     }
 
+    /// <summary>Modification d'un rapport par l'élève auteur, tant qu'il n'a pas été validé par l'encadrant.</summary>
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = "RequireStudentRole")]
+    public async Task<IActionResult> UpdateReport(Guid id, [FromBody] UpdateReportCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanAccessReportAsync(id, cancellationToken))
+            return Forbid();
+
+        var result = await _reportService.UpdateReportAsync(id, command, _currentUserService.UserId!, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Modification impossible", Detail = result.Error, Status = 400 });
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>Commentaire de l'encadrant / du responsable, ou réponse de l'élève sur son propre rapport.</summary>
     [HttpPost("{id:guid}/comments")]
-    [Authorize(Policy = "RequireSupervisorRole")]
     public async Task<IActionResult> AddComment(Guid id, [FromBody] AddCommentCommand command, CancellationToken cancellationToken)
     {
-        if (!await _accessControl.CanSuperviseReportAsync(id, cancellationToken))
+        if (!await _accessControl.CanCommentOnReportAsync(id, cancellationToken))
             return Forbid();
 
         var authorId = _currentUserService.UserId!;

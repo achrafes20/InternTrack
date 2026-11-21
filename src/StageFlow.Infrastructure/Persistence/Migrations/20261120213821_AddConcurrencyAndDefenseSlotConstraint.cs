@@ -115,15 +115,29 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
             //    Sur Azure Database for PostgreSQL, l'extension doit être autorisée (paramètre azure.extensions = BTREE_GIST).
             migrationBuilder.Sql(@"CREATE EXTENSION IF NOT EXISTS btree_gist;");
 
-            // 3. Garantie au niveau base : deux soutenances ne peuvent pas occuper la même salle (insensible à la casse)
+            // 3. La valeur par défaut technique (-infinity) n'a servi qu'à ajouter la colonne NOT NULL.
+            migrationBuilder.Sql(@"ALTER TABLE ""Defenses"" ALTER COLUMN ""EndsAt"" DROP DEFAULT;");
+
+            // 4. Invariant du domaine garanti par la base : une soutenance finit après avoir commencé.
+            migrationBuilder.Sql(@"
+                ALTER TABLE ""Defenses""
+                ADD CONSTRAINT ""CK_Defenses_EndsAfterStart"" CHECK (""EndsAt"" > ""ScheduledAt"");");
+
+            // 5. Garantie au niveau base : deux soutenances ne peuvent pas occuper la même salle (insensible à la casse)
             //    sur des créneaux qui se chevauchent, même si deux requêtes concurrentes passent la vérification applicative.
             //    Intervalle semi-ouvert [début, fin[ : deux soutenances consécutives (10h-11h puis 11h-12h) restent autorisées.
+            //
+            //    GREATEST(EndsAt, ScheduledAt) : toute la migration s'exécute dans une seule transaction, et l'UPDATE
+            //    ci-dessus laisse l'ancienne version des lignes (EndsAt = -infinity) que PostgreSQL indexe quand même
+            //    lors de la construction de l'index dans la même transaction. Sans GREATEST, tstzrange lèverait
+            //    « range lower bound must be less than or equal to range upper bound ». Pour les lignes réelles
+            //    (EndsAt > ScheduledAt, garanti par CK_Defenses_EndsAfterStart), l'expression est identique à EndsAt.
             migrationBuilder.Sql(@"
                 ALTER TABLE ""Defenses""
                 ADD CONSTRAINT ""EX_Defenses_Classroom_Slot""
                 EXCLUDE USING gist (
                     lower(""Classroom"") WITH =,
-                    tstzrange(""ScheduledAt"", ""EndsAt"", '[)') WITH &&
+                    tstzrange(""ScheduledAt"", GREATEST(""EndsAt"", ""ScheduledAt""), '[)') WITH &&
                 );");
         }
 
@@ -131,6 +145,7 @@ namespace StageFlow.Infrastructure.Persistence.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql(@"ALTER TABLE ""Defenses"" DROP CONSTRAINT IF EXISTS ""EX_Defenses_Classroom_Slot"";");
+            migrationBuilder.Sql(@"ALTER TABLE ""Defenses"" DROP CONSTRAINT IF EXISTS ""CK_Defenses_EndsAfterStart"";");
             // L'extension btree_gist est conservée : elle peut être utilisée par d'autres objets.
 
             migrationBuilder.DropIndex(

@@ -94,8 +94,13 @@ az webapp config appsettings set \
     Database__AutoMigrate="true" \
     Database__SeedDemoData="false" \
     Gemini__ApiKey="<clé API Gemini>" \
-    Gemini__Model="gemini-2.5-flash"
+    Gemini__Model="gemini-2.5-flash" \
+    Storage__RootPath="/home/data/uploads" \
+    DataProtection__KeysPath="/home/data/keys" \
+    AppConfig__TimeZone="Africa/Casablanca"
 ```
+
+> **Fichiers déposés** : sur App Service Linux, seul `/home` est persistant (et partagé entre instances). Les mémoires et les conventions signées y sont donc stockés, de même que les clés de protection des données ; sans ces clés, les liens de réinitialisation de mot de passe seraient invalidés à chaque redémarrage. Pour un volume important ou plusieurs régions, remplacez `LocalFileStorage` par une implémentation Azure Blob Storage de `IFileStorage`.
 
 > **Pourquoi ces réglages ?**
 > - `Cors__AllowedOrigins__0` : le front (Static Web Apps) et l'API (App Service) sont sur deux domaines différents.

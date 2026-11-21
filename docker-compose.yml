@@ -9,7 +9,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stageflow_password}
     ports:
       # Exposé uniquement sur la machine hôte, jamais sur le réseau.
-      - "127.0.0.1:5432:5432"
+      # Port hôte 5433 par défaut : 5432 est souvent déjà pris par un PostgreSQL local (Odoo, installation native…).
+      # L'API n'utilise pas ce port : elle joint la base via le réseau Docker interne (stageflow-db:5432).
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -46,6 +48,12 @@ services:
       - ReverseProxy__KnownNetworks__0=172.16.0.0/12
       - ReverseProxy__KnownNetworks__1=192.168.0.0/16
       - ReverseProxy__KnownNetworks__2=10.0.0.0/8
+      # Fichiers déposés et clés de protection des données (liens de réinitialisation) : persistés.
+      - Storage__RootPath=/app/data/uploads
+      - DataProtection__KeysPath=/app/data/keys
+      - AppConfig__TimeZone=Africa/Casablanca
+    volumes:
+      - stageflow_data:/app/data
     ports:
       - "5000:8080"
     depends_on:
@@ -72,3 +80,4 @@ services:
 
 volumes:
   postgres_data:
+  stageflow_data:

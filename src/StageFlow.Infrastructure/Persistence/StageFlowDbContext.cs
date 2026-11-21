@@ -37,6 +37,8 @@ public class StageFlowDbContext : IdentityDbContext<ApplicationUser>, IApplicati
     public DbSet<DefenseJuryMember> DefenseJuryMembers => Set<DefenseJuryMember>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<DefenseEvaluation> DefenseEvaluations => Set<DefenseEvaluation>();
+    public DbSet<InternshipDocument> InternshipDocuments => Set<InternshipDocument>();
 
     /// <summary>Nom de la propriété fantôme mappée sur la colonne système PostgreSQL « xmin ».</summary>
     public const string ConcurrencyTokenProperty = "Version";
@@ -148,6 +150,15 @@ public class StageFlowDbContext : IdentityDbContext<ApplicationUser>, IApplicati
     {
         base.OnModelCreating(builder);
         builder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+
+        // Les identifiants sont générés par le domaine (Guid.NewGuid) : EF ne doit pas les considérer comme
+        // « générés par la base ». Sans cela, une entité ajoutée via une navigation (ex. une évaluation ajoutée
+        // à Defense.Evaluations) serait prise pour une ligne existante et mise à jour au lieu d'être insérée.
+        foreach (var entityType in builder.Model.GetEntityTypes()
+                     .Where(t => !t.IsOwned() && typeof(BaseEntity).IsAssignableFrom(t.ClrType)))
+        {
+            builder.Entity(entityType.ClrType).Property(nameof(BaseEntity.Id)).ValueGeneratedNever();
+        }
 
         // Concurrence optimiste : chaque entité métier modifiable porte la colonne système PostgreSQL « xmin »
         // comme jeton. Si deux utilisateurs modifient la même ligne, le second SaveChanges échoue

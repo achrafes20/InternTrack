@@ -14,17 +14,60 @@ public interface IProgressReportService
     Task<Result<ProgressReportDto>> CreateReportAsync(Guid internshipId, CreateReportCommand command, string studentId, CancellationToken cancellationToken);
     Task<Result<ReportCommentDto>> AddCommentAsync(Guid reportId, string content, string authorId, string authorFullName, CancellationToken cancellationToken);
     Task<Result> ValidateReportAsync(Guid reportId, string supervisorId, CancellationToken cancellationToken);
+    Task<Result<ProgressReportDto>> UpdateReportAsync(Guid reportId, UpdateReportCommand command, string studentId, CancellationToken cancellationToken);
 }
 
 public class ProgressReportService : IProgressReportService
 {
     private readonly IApplicationDbContext _context;
     private readonly IIdentityService _identityService;
+    private readonly ITimeZoneService _timeZone;
 
-    public ProgressReportService(IApplicationDbContext context, IIdentityService identityService)
+    public ProgressReportService(IApplicationDbContext context, IIdentityService identityService, ITimeZoneService timeZone)
     {
         _context = context;
         _identityService = identityService;
+        _timeZone = timeZone;
+    }
+
+    /// <summary>
+    /// La semaine doit appartenir à la période du stage et avoir déjà commencé :
+    /// on ne rédige pas le rapport d'une semaine future.
+    /// </summary>
+    private Result ValidateWeek(Internship internship, int weekNumber)
+    {
+        if (weekNumber < 1 || weekNumber > internship.TotalWeeks)
+            return Result.Failure($"Le numéro de semaine doit être compris entre 1 et {internship.TotalWeeks} (durée du stage).");
+
+        var weekStartLocal = _timeZone.ToLocal(internship.WeekStart(weekNumber)).Date;
+        if (weekStartLocal > _timeZone.LocalToday)
+            return Result.Failure($"La semaine {weekNumber} commence le {weekStartLocal:dd/MM/yyyy} : son rapport ne peut pas encore être déposé.");
+
+        return Result.Success();
+    }
+
+    public async Task<Result<ProgressReportDto>> UpdateReportAsync(Guid reportId, UpdateReportCommand command, string studentId, CancellationToken cancellationToken)
+    {
+        var report = await _context.ProgressReports
+            .Include(r => r.Internship)
+            .Include(r => r.Comments)
+            .FirstOrDefaultAsync(r => r.Id == reportId, cancellationToken);
+
+        if (report == null)
+            return Result<ProgressReportDto>.Failure("Rapport introuvable.");
+
+        if (report.Internship.StudentId != studentId)
+            return Result<ProgressReportDto>.Failure("Seul l'élève ingénieur auteur du rapport peut le modifier.");
+
+        if (!Internship.RunningStatuses.Contains(report.Internship.Status))
+            return Result<ProgressReportDto>.Failure("Le stage est clôturé : ses rapports ne peuvent plus être modifiés.");
+
+        var update = report.Update(command.Title, command.ActivitiesPerformed, command.SkillsAcquired, command.DifficultiesEncountered, command.NextWeekGoals);
+        if (update.IsFailure)
+            return Result<ProgressReportDto>.Failure(update.Error);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Result<ProgressReportDto>.Success(MapToDto(report));
     }
 
     public async Task<List<ProgressReportDto>> GetAllReportsAsync(string userId, string role, Guid? academicTrackId, CancellationToken cancellationToken)
@@ -98,11 +141,12 @@ public class ProgressReportService : IProgressReportService
         if (internship.StudentId != studentId)
             return Result<ProgressReportDto>.Failure("Seul l'élève ingénieur propriétaire du stage peut déposer un rapport.");
 
-        if (internship.Status != InternshipStatus.EnCours && internship.Status != InternshipStatus.SoutenancePlanifiee && internship.Status != InternshipStatus.Valide)
-            return Result<ProgressReportDto>.Failure($"Les rapports ne peuvent être déposés que pour un stage validé ou en cours (Statut : {internship.Status}).");
+        if (!Internship.RunningStatuses.Contains(internship.Status))
+            return Result<ProgressReportDto>.Failure($"Les rapports ne peuvent être déposés que pendant le stage, une fois celui-ci démarré (Statut : {internship.Status}).");
 
-        if (command.WeekNumber < 1 || command.WeekNumber > 60)
-            return Result<ProgressReportDto>.Failure("Le numéro de semaine doit être compris entre 1 et 60.");
+        var weekCheck = ValidateWeek(internship, command.WeekNumber);
+        if (weekCheck.IsFailure)
+            return Result<ProgressReportDto>.Failure(weekCheck.Error);
 
         if (string.IsNullOrWhiteSpace(command.ActivitiesPerformed))
             return Result<ProgressReportDto>.Failure("La description des activités réalisées est obligatoire.");

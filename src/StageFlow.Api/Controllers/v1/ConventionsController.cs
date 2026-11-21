@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StageFlow.Application.Common.Security;
 using StageFlow.Application.Features.Conventions.DTOs;
 using StageFlow.Application.Features.Conventions.Services;
@@ -33,10 +34,8 @@ public class ConventionsController : ApiControllerBase
     }
 
     /// <summary>
-    /// Enregistre la signature d'une partie :
-    /// - Student : uniquement l'élève propriétaire du stage ;
-    /// - School : le responsable de la filière (ou un administrateur) ;
-    /// - Company : le responsable de filière (ou un administrateur), à réception de l'exemplaire signé par l'entreprise.
+    /// Signature de l'élève (propriétaire du stage) ou de l'école (responsable de la filière / administrateur).
+    /// L'entreprise signe via son lien, ou l'école l'enregistre sur dépôt du scan signé.
     /// </summary>
     [HttpPost("internship/{internshipId:guid}/sign")]
     public async Task<IActionResult> Sign(Guid internshipId, [FromBody] SignConventionCommand command, CancellationToken cancellationToken)
@@ -44,7 +43,8 @@ public class ConventionsController : ApiControllerBase
         var allowed = command.Party switch
         {
             ConventionParty.Student => _accessControl.IsStudent && await _accessControl.CanAccessInternshipAsync(internshipId, cancellationToken),
-            ConventionParty.School or ConventionParty.Company => await _accessControl.CanManageInternshipAsync(internshipId, cancellationToken),
+            ConventionParty.School => await _accessControl.CanManageInternshipAsync(internshipId, cancellationToken),
+            ConventionParty.Company => true, // refusé par le service avec un message explicatif
             _ => false
         };
 
@@ -52,6 +52,61 @@ public class ConventionsController : ApiControllerBase
             return Forbid();
 
         var result = await _conventionService.SignAsync(internshipId, command.Party, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Signature impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Envoie au tuteur entreprise un lien de signature à usage unique (renvoi possible : l'ancien lien est invalidé).</summary>
+    [HttpPost("internship/{internshipId:guid}/company-signing-link")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> SendCompanySigningLink(Guid internshipId, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanManageInternshipAsync(internshipId, cancellationToken))
+            return Forbid();
+
+        var result = await _conventionService.SendCompanySigningLinkAsync(internshipId, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Envoi impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Enregistre la signature de l'entreprise reçue sur papier (le scan signé doit avoir été déposé).</summary>
+    [HttpPost("internship/{internshipId:guid}/company-signature")]
+    [Authorize(Policy = "RequireDepartmentHeadRole")]
+    public async Task<IActionResult> RecordCompanySignature(Guid internshipId, [FromBody] RecordCompanySignatureCommand command, CancellationToken cancellationToken)
+    {
+        if (!await _accessControl.CanManageInternshipAsync(internshipId, cancellationToken))
+            return Forbid();
+
+        var result = await _conventionService.RecordCompanySignatureAsync(internshipId, command.SignerName, cancellationToken);
+        if (result.IsFailure)
+            return BadRequest(new ProblemDetails { Title = "Signature impossible", Detail = result.Error, Status = 400 });
+
+        return NoContent();
+    }
+
+    /// <summary>Page publique de signature : informations de la convention associée au lien.</summary>
+    [HttpGet("company-signing/{token}")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> GetCompanySigningInfo(string token, CancellationToken cancellationToken)
+    {
+        var result = await _conventionService.GetCompanySigningInfoAsync(token, cancellationToken);
+        if (result.IsFailure)
+            return NotFound(new ProblemDetails { Title = "Lien invalide", Detail = result.Error, Status = 404 });
+
+        return Ok(result.Value);
+    }
+
+    [HttpPost("company-signing/{token}")]
+    [AllowAnonymous]
+    [EnableRateLimiting("public_token_limiter")]
+    public async Task<IActionResult> SignByCompany(string token, [FromBody] CompanySignCommand command, CancellationToken cancellationToken)
+    {
+        var result = await _conventionService.SignByCompanyAsync(token, command, cancellationToken);
         if (result.IsFailure)
             return BadRequest(new ProblemDetails { Title = "Signature impossible", Detail = result.Error, Status = 400 });
 

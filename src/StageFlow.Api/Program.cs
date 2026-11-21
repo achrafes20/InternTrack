@@ -52,6 +52,18 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 // Rate Limiting (Protection contre le brute force sur /login)
 builder.Services.AddRateLimiter(options =>
 {
+    // Endpoints publics à jeton (lien de signature entreprise) et demandes de réinitialisation de mot de passe :
+    // empêche l'énumération de jetons et l'envoi massif d'e-mails.
+    options.AddPolicy("public_token_limiter", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+
     options.AddPolicy("refresh_limiter", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -90,7 +102,9 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials()
+              // Nom des fichiers téléchargés (mémoire, convention) lisible par un front sur un autre domaine.
+              .WithExposedHeaders("Content-Disposition");
     });
 });
 

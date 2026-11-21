@@ -25,6 +25,12 @@ public interface IAccessControlService
     Task<bool> CanSuperviseReportAsync(Guid reportId, CancellationToken cancellationToken = default);
     Task<bool> CanAccessDefenseAsync(Guid defenseId, CancellationToken cancellationToken = default);
     Task<bool> CanManageDefenseAsync(Guid defenseId, CancellationToken cancellationToken = default);
+
+    /// <summary>Encadrants et responsables commentent ; l'élève auteur peut répondre sur ses propres rapports.</summary>
+    Task<bool> CanCommentOnReportAsync(Guid reportId, CancellationToken cancellationToken = default);
+
+    /// <summary>Documents du stage : personnes ayant accès au dossier, plus les membres du jury de sa soutenance.</summary>
+    Task<bool> CanViewInternshipDocumentsAsync(Guid internshipId, CancellationToken cancellationToken = default);
 }
 
 public class AccessControlService : IAccessControlService
@@ -113,6 +119,27 @@ public class AccessControlService : IAccessControlService
 
         var info = await LoadDefenseAccessInfoAsync(defenseId, cancellationToken);
         return info is not null && IsDepartmentHead && IsSameTrack(info.AcademicTrackId);
+    }
+
+    public async Task<bool> CanCommentOnReportAsync(Guid reportId, CancellationToken cancellationToken = default)
+    {
+        if (IsStudent)
+            return await CanAccessReportAsync(reportId, cancellationToken);
+
+        return await CanSuperviseReportAsync(reportId, cancellationToken);
+    }
+
+    public async Task<bool> CanViewInternshipDocumentsAsync(Guid internshipId, CancellationToken cancellationToken = default)
+    {
+        if (await CanAccessInternshipAsync(internshipId, cancellationToken))
+            return true;
+
+        if (!IsAuthenticated || !IsSupervisor && !IsDepartmentHead)
+            return false;
+
+        return await _context.Defenses
+            .AsNoTracking()
+            .AnyAsync(d => d.InternshipId == internshipId && d.JuryMembers.Any(m => m.TeacherId == UserId), cancellationToken);
     }
 
     private bool IsAuthenticated => _currentUser.IsAuthenticated && !string.IsNullOrEmpty(UserId);

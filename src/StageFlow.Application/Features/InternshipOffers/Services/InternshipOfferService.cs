@@ -22,6 +22,8 @@ public interface IInternshipOfferService
 
     Task<Result<InternshipOfferDto>> GetOfferByIdAsync(Guid id, CancellationToken cancellationToken);
     Task<Result<InternshipOfferDto>> CreateOfferAsync(CreateInternshipOfferCommand command, CancellationToken cancellationToken);
+    Task<Result<InternshipOfferDto>> UpdateOfferAsync(Guid id, UpdateInternshipOfferCommand command, CancellationToken cancellationToken);
+    Task<Result> SetActiveAsync(Guid id, bool isActive, CancellationToken cancellationToken);
 }
 
 public class InternshipOfferService : IInternshipOfferService
@@ -129,6 +131,40 @@ public class InternshipOfferService : IInternshipOfferService
             offer.AcademicTrack.Code);
 
         return Result<InternshipOfferDto>.Success(dto);
+    }
+
+    public async Task<Result<InternshipOfferDto>> UpdateOfferAsync(Guid id, UpdateInternshipOfferCommand command, CancellationToken cancellationToken)
+    {
+        var offer = await _context.InternshipOffers.FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
+        if (offer == null)
+            return Result<InternshipOfferDto>.Failure("Offre de stage introuvable.");
+
+        offer.Update(
+            command.Title.Trim(),
+            command.Description,
+            command.RequiredSkills,
+            command.City.Trim(),
+            command.DurationInWeeks,
+            command.MonthlyStipend,
+            command.ExpirationDate,
+            offer.IsActive);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return await GetOfferByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<Result> SetActiveAsync(Guid id, bool isActive, CancellationToken cancellationToken)
+    {
+        var offer = await _context.InternshipOffers.FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
+        if (offer == null)
+            return Result.Failure("Offre de stage introuvable.");
+
+        if (isActive && offer.ExpirationDate < DateTime.UtcNow)
+            return Result.Failure("Cette offre est expirée : modifiez d'abord sa date limite avant de la réactiver.");
+
+        if (isActive) offer.Activate(); else offer.Deactivate();
+        await _context.SaveChangesAsync(cancellationToken);
+        return Result.Success();
     }
 
     public async Task<Result<InternshipOfferDto>> CreateOfferAsync(CreateInternshipOfferCommand command, CancellationToken cancellationToken)

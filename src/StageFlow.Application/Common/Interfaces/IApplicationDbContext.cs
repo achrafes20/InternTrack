@@ -16,6 +16,8 @@ public interface IApplicationDbContext
     DbSet<DefenseJuryMember> DefenseJuryMembers { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
     DbSet<AuditLog> AuditLogs { get; }
+    DbSet<DefenseEvaluation> DefenseEvaluations { get; }
+    DbSet<InternshipDocument> InternshipDocuments { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 

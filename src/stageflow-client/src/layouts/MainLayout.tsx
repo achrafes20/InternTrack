@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChangePasswordDialog } from '../features/auth/ChangePasswordDialog';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faTableColumns, faBriefcase, faFolderOpen, faFileLines,
-  faGraduationCap, faClipboardList, faUsers, faRightFromBracket, faUserCircle
+  faGraduationCap, faClipboardList, faUsers, faRightFromBracket, faKey, faTriangleExclamation
 } from '@fortawesome/free-solid-svg-icons';
 
 const NAV_ICONS: Record<string, any> = {
@@ -13,6 +14,7 @@ const NAV_ICONS: Record<string, any> = {
   '/internships': faFolderOpen,
   '/reports':     faFileLines,
   '/defenses':    faGraduationCap,
+  '/anomalies':   faTriangleExclamation,
   '/audit':       faClipboardList,
   '/users':       faUsers,
 };
@@ -35,6 +37,7 @@ export const MainLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
 
   const handleLogout = async () => {
     await logout();
@@ -47,6 +50,7 @@ export const MainLayout: React.FC = () => {
     { path: '/internships', label: user?.role === 'Etudiant' ? 'Mes Stages & PFE' : 'Gestion des Stages', roles: ['Admin', 'ResponsableFiliere', 'Encadrant', 'Etudiant'] },
     { path: '/reports',     label: 'Rapports & Suivi',                                             roles: ['Admin', 'ResponsableFiliere', 'Encadrant', 'Etudiant'] },
     { path: '/defenses',    label: 'Soutenances',                                                  roles: ['Admin', 'ResponsableFiliere', 'Encadrant', 'Etudiant'] },
+    { path: '/anomalies',   label: 'Anomalies',                                                  roles: ['Admin', 'ResponsableFiliere'] },
     { path: '/audit',       label: "Journal d'audit",                                              roles: ['Admin'] },
     { path: '/users',       label: 'Utilisateurs',                                                 roles: ['Admin'] },
   ];
@@ -80,6 +84,14 @@ export const MainLayout: React.FC = () => {
               <div className="text-xs opacity-75">{roleLabel}</div>
             </div>
           </div>
+          <button
+            onClick={() => setShowPasswordDialog(true)}
+            title="Changer mon mot de passe"
+            className="flex items-center gap-2 bg-white/15 hover:bg-white/25 border border-white/30 text-white rounded-lg px-3 py-1.5 text-sm font-semibold transition-all"
+          >
+            <FontAwesomeIcon icon={faKey} className="text-xs" />
+            <span className="hidden md:inline">Mot de passe</span>
+          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-2 bg-white/15 hover:bg-white/25 border border-white/30 text-white rounded-lg px-3 py-1.5 text-sm font-semibold transition-all"
@@ -118,6 +130,8 @@ export const MainLayout: React.FC = () => {
       <main className="flex-1 max-w-screen-xl mx-auto w-full px-6 py-7 box-border">
         <Outlet />
       </main>
+
+      {showPasswordDialog && <ChangePasswordDialog onClose={() => setShowPasswordDialog(false)} />}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 text-center py-3 text-xs text-slate-400">

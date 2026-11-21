@@ -1,15 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, Title, Text, Button, Tag, Dialog, TextArea, Input } from '@ui5/webcomponents-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faFolderOpen, faCheck, faTimes, faFilePdf, faPlus, faBuilding,
   faSearch, faFilter, faRotateLeft, faPaperPlane,
   faPlay, faUser, faCalendar, faIdCard, faBriefcase, faTriangleExclamation,
-  faHourglass, faPenToSquare, faSignature, faChalkboardUser, faFileContract
+  faHourglass, faPenToSquare, faSignature, faChalkboardUser, faFileContract,
+  faEnvelope, faUpload, faDownload, faBook, faBan
 } from '@fortawesome/free-solid-svg-icons';
-import { api } from '../../api/client';
+import { api, downloadFile, uploadFile } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { Internship, CompanyRef, Track, Teacher, ConventionParty, apiErrorMessage } from '../../types';
 
@@ -29,7 +30,8 @@ const getStatusOrder = (statusStr: string): number => {
 
 const WorkflowStepper: React.FC<{ currentStatus: string }> = ({ currentStatus }) => {
   const currentIdx = getStatusOrder(currentStatus);
-  const isRefused = currentStatus === 'Refuse';
+  // Refus et annulation sont des sorties du parcours : aucune étape n'est « en cours ».
+  const isRefused = currentStatus === 'Refuse' || currentStatus === 'Annule';
 
   return (
     <div className="flex items-center mb-4 flex-wrap gap-0">
@@ -62,7 +64,7 @@ const WorkflowStepper: React.FC<{ currentStatus: string }> = ({ currentStatus })
         );
       })}
       {isRefused && (
-        <span className="ml-2 mb-3.5 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold">Refusé</span>
+        <span className="ml-2 mb-3.5 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold">{currentStatus === 'Annule' ? 'Annulé' : 'Refusé'}</span>
       )}
     </div>
   );
@@ -76,11 +78,12 @@ const STATUS_CONFIG: Record<string, { label: string; colorScheme: string; classN
   EnCours: { label: 'En cours', colorScheme: '7', className: 'bg-green-100 text-green-800' },
   SoutenancePlanifiee: { label: 'Soutenance planifiée', colorScheme: '8', className: 'bg-indigo-100 text-indigo-800' },
   Termine: { label: 'Terminé', colorScheme: '10', className: 'bg-slate-100 text-slate-700' },
+  Annule: { label: 'Annulé', colorScheme: '2', className: 'bg-gray-200 text-gray-600 line-through' },
 };
 
 const STATUS_BAR_COLOR: Record<string, string> = {
   EnCours: '#107e3e', Valide: '#0070f3', Refuse: '#e53935',
-  Termine: '#6b7280', Propose: '#f5a623', SoutenancePlanifiee: '#6366f1',
+  Termine: '#6b7280', Propose: '#f5a623', SoutenancePlanifiee: '#6366f1', Annule: '#9ca3af',
 };
 
 export const InternshipsPage: React.FC = () => {
@@ -102,6 +105,16 @@ export const InternshipsPage: React.FC = () => {
 
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('Tous');
+  const [yearFilter, setYearFilter] = useState('');
+  const [cancelTarget, setCancelTarget] = useState<Internship | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+
+  // Dossier ouvert depuis le rapport d'anomalies : mis en évidence et amené à l'écran.
+  const location = useLocation();
+  const focusId = (location.state as { focusInternshipId?: string } | null)?.focusInternshipId;
+  const focusRef = React.useCallback((node: HTMLDivElement | null) => {
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
   const [title, setTitle] = useState('');
   const [subjectDescription, setSubjectDescription] = useState('');
@@ -110,13 +123,21 @@ export const InternshipsPage: React.FC = () => {
   const [supervisorName, setSupervisorName] = useState('');
   const [supervisorEmail, setSupervisorEmail] = useState('');
   const [supervisorPhone, setSupervisorPhone] = useState('');
-  const [startDate, setStartDate] = useState('2026-03-01');
-  const [endDate, setEndDate] = useState('2026-08-31');
+  // Valeurs par défaut cohérentes avec les règles : début dans une semaine, durée de 6 mois.
+  const isoDate = (d: Date) => d.toISOString().substring(0, 10);
+  const defaultStart = () => { const d = new Date(); d.setDate(d.getDate() + 7); return d; };
+  const defaultEnd = () => { const d = defaultStart(); d.setMonth(d.getMonth() + 6); return d; };
+  const [startDate, setStartDate] = useState(isoDate(defaultStart()));
+  const [endDate, setEndDate] = useState(isoDate(defaultEnd()));
   const [proposeError, setProposeError] = useState('');
 
+  const [companySignTarget, setCompanySignTarget] = useState<Internship | null>(null);
+  const [companySignerName, setCompanySignerName] = useState('');
+  const [actionInfo, setActionInfo] = useState('');
+
   const { data: internships, isLoading } = useQuery<Internship[]>({
-    queryKey: ['internships'],
-    queryFn: async () => { const res = await api.get('/internships'); return res.data; },
+    queryKey: ['internships', yearFilter],
+    queryFn: async () => (await api.get('/internships', { params: { academicYear: yearFilter || undefined } })).data,
   });
 
   const { data: companies = [] } = useQuery<CompanyRef[]>({
@@ -131,18 +152,63 @@ export const InternshipsPage: React.FC = () => {
     enabled: openProposeModal,
   });
 
+  // Seuls les enseignants de la filière du stage (ou transversaux) peuvent l'encadrer.
   const { data: teachers = [] } = useQuery<Teacher[]>({
-    queryKey: ['teachers'],
-    queryFn: async () => { const res = await api.get('/teachers'); return res.data; },
+    queryKey: ['teachers', assignTarget?.academicTrackId],
+    queryFn: async () => (await api.get('/teachers', { params: { trackId: assignTarget?.academicTrackId } })).data,
     enabled: isCoord && !!assignTarget,
   });
 
   /** Mutation standard : rafraîchit la liste et affiche l'erreur métier renvoyée par l'API. */
-  const useAction = <T,>(fn: (arg: T) => Promise<unknown>, onDone?: () => void) => useMutation({
-    mutationFn: async (arg: T) => { setActionError(''); await fn(arg); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['internships'] }); onDone?.(); },
+  const useAction = <T,>(fn: (arg: T) => Promise<unknown>, onDone?: () => void, successMessage?: string) => useMutation({
+    mutationFn: async (arg: T) => { setActionError(''); setActionInfo(''); await fn(arg); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['internships'] });
+      if (successMessage) setActionInfo(successMessage);
+      onDone?.();
+    },
     onError: (err: any) => setActionError(apiErrorMessage(err, "L'action a échoué.")),
   });
+
+  const { data: academicYears = [] } = useQuery<string[]>({
+    queryKey: ['academic-years'],
+    queryFn: async () => (await api.get('/internships/academic-years')).data,
+  });
+
+  const cancelMutation = useAction(
+    ({ id, reason }: { id: string; reason: string }) => api.post(`/internships/${id}/cancel`, { reason }),
+    () => { setCancelTarget(null); setCancelReason(''); queryClient.invalidateQueries({ queryKey: ['anomalies'] }); },
+    'Dossier annulé.');
+
+  const sendCompanyLinkMutation = useAction(
+    (id: string) => api.post(`/conventions/internship/${id}/company-signing-link`),
+    undefined,
+    "Le lien de signature a été envoyé par e-mail au tuteur entreprise.");
+  const recordCompanySignatureMutation = useAction(
+    ({ id, signerName }: { id: string; signerName: string }) => api.post(`/conventions/internship/${id}/company-signature`, { signerName }),
+    () => { setCompanySignTarget(null); setCompanySignerName(''); });
+  const uploadMutation = useAction(
+    ({ id, kind, file }: { id: string; kind: 'thesis' | 'signed-convention'; file: File }) => uploadFile(`/internships/${id}/documents/${kind}`, file),
+    undefined,
+    'Document déposé.');
+
+  const pickAndUpload = (id: string, kind: 'thesis' | 'signed-convention') => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/pdf,.pdf';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) { setActionError('Le fichier dépasse 20 Mo.'); return; }
+      uploadMutation.mutate({ id, kind, file });
+    };
+    input.click();
+  };
+
+  const handleDownloadDocument = async (docId: string, name: string) => {
+    try { setActionError(''); await downloadFile(`/documents/${docId}/download`, name); }
+    catch (err: any) { setActionError(apiErrorMessage(err, 'Téléchargement impossible.')); }
+  };
 
   const submitMutation = useAction((id: string) => api.post(`/internships/${id}/submit`));
   const reopenMutation = useAction((id: string) => api.post(`/internships/${id}/reopen`));
@@ -233,6 +299,7 @@ export const InternshipsPage: React.FC = () => {
     { value: 'Refuse', label: 'Refusé' },
     { value: 'EnCours', label: 'En cours' }, { value: 'SoutenancePlanifiee', label: 'Soutenance planifiée' },
     { value: 'Termine', label: 'Terminé' },
+    { value: 'Annule', label: 'Annulé' },
   ];
 
   const showStudentName = user?.role === 'ResponsableFiliere' || user?.role === 'Admin' || user?.role === 'Encadrant';
@@ -309,6 +376,20 @@ export const InternshipsPage: React.FC = () => {
             </div>
           </div>
 
+          {academicYears.length > 0 && (
+            <div style={{ minWidth: '170px' }}>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 mb-1.5">
+                <FontAwesomeIcon icon={faCalendar} className="text-blue-500 text-xs" />
+                <span>Année universitaire</span>
+              </label>
+              <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)}
+                className="w-full px-3 py-2.5 bg-gray-50/70 border border-gray-200 rounded-xl text-sm cursor-pointer box-border">
+                <option value="">Toutes les années</option>
+                {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          )}
+
           {(searchText || statusFilter !== 'Tous') && (
             <button
               onClick={() => { setSearchText(''); setStatusFilter('Tous'); }}
@@ -333,6 +414,15 @@ export const InternshipsPage: React.FC = () => {
         <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded text-sm text-red-700 flex justify-between items-center">
           <span><FontAwesomeIcon icon={faTriangleExclamation} className="mr-2" />{actionError}</span>
           <button onClick={() => setActionError('')} className="text-red-500 hover:text-red-700" aria-label="Fermer">
+            <FontAwesomeIcon icon={faTimes} />
+          </button>
+        </div>
+      )}
+
+      {actionInfo && (
+        <div className="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm text-green-800 flex justify-between items-center">
+          <span><FontAwesomeIcon icon={faCheck} className="mr-2" />{actionInfo}</span>
+          <button onClick={() => setActionInfo('')} className="text-green-600 hover:text-green-800" aria-label="Fermer">
             <FontAwesomeIcon icon={faTimes} />
           </button>
         </div>
@@ -382,7 +472,8 @@ export const InternshipsPage: React.FC = () => {
               ? new Date(i.endDate).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 
             return (
-              <div key={i.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div key={i.id} ref={i.id === focusId ? focusRef : undefined}
+                className={`bg-white rounded-xl border shadow-sm overflow-hidden ${i.id === focusId ? 'border-amber-400 ring-4 ring-amber-200' : 'border-gray-200'}`}>
                 <div style={{ height: '4px', background: barColor }} />
                 <div className="p-5">
                   <WorkflowStepper currentStatus={st} />
@@ -448,6 +539,28 @@ export const InternshipsPage: React.FC = () => {
                               </span>
                             ))}
                           </div>
+                          {conv.companySignerName && (
+                            <div className="mt-1 text-slate-500">Signé pour l'entreprise par {conv.companySignerName}</div>
+                          )}
+                          {!conv.isSignedByCompany && conv.companySigningLinkExpiresAt && (
+                            <div className="mt-1 text-blue-700">
+                              <FontAwesomeIcon icon={faEnvelope} className="mr-1" />
+                              Lien de signature envoyé à l'entreprise (valable jusqu'au {new Date(conv.companySigningLinkExpiresAt).toLocaleDateString('fr-FR')})
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {i.documents.length > 0 && (
+                        <div className="mt-2 flex flex-col gap-1">
+                          {i.documents.map(d => (
+                            <button key={d.id} onClick={() => handleDownloadDocument(d.id, d.fileName)}
+                              className="self-start flex items-center gap-1.5 text-xs text-blue-700 hover:underline">
+                              <FontAwesomeIcon icon={d.kind === 'FinalThesis' ? faBook : faFileContract} />
+                              {d.kind === 'FinalThesis' ? 'Mémoire' : 'Convention signée (scan)'} : {d.fileName}
+                              <span className="text-gray-400">({(d.sizeBytes / 1024 / 1024).toFixed(1)} Mo, {new Date(d.uploadedAt).toLocaleDateString('fr-FR')})</span>
+                            </button>
+                          ))}
                         </div>
                       )}
 
@@ -457,6 +570,12 @@ export const InternshipsPage: React.FC = () => {
                             ? i.subjectDescription.substring(0, 150) + '...'
                             : i.subjectDescription}
                         </p>
+                      )}
+
+                      {i.cancellationReason && (
+                        <div className="mt-2 p-2.5 bg-gray-100 border-l-2 border-gray-500 rounded text-xs text-gray-700">
+                          <strong>Dossier annulé :</strong> {i.cancellationReason}
+                        </div>
                       )}
 
                       {i.rejectionReason && (
@@ -504,15 +623,38 @@ export const InternshipsPage: React.FC = () => {
                         </Button>
                       )}
                       {isCoord && conv && !conv.isSignedByCompany && isActiveFile && (
-                        <Button onClick={() => signMutation.mutate({ id: i.id, party: 'Company' })} disabled={signMutation.isPending}
-                          tooltip="À utiliser à réception de l'exemplaire signé par l'entreprise">
-                          <FontAwesomeIcon icon={faBuilding} className="mr-1" /> Enregistrer la signature entreprise
+                        <>
+                          <Button onClick={() => sendCompanyLinkMutation.mutate(i.id)} disabled={sendCompanyLinkMutation.isPending}
+                            tooltip={`Envoie un lien de signature à ${i.companySupervisorEmail}`}>
+                            <FontAwesomeIcon icon={faEnvelope} className="mr-1" />
+                            {conv.companySigningLinkExpiresAt ? 'Renvoyer le lien entreprise' : "Envoyer le lien à l'entreprise"}
+                          </Button>
+                          <Button onClick={() => { setCompanySignTarget(i); setCompanySignerName(i.companySupervisorName); }}
+                            tooltip="Signature reçue sur papier : le scan signé doit être déposé">
+                            <FontAwesomeIcon icon={faBuilding} className="mr-1" /> Signature papier reçue
+                          </Button>
+                        </>
+                      )}
+                      {conv && isActiveFile && (isStudent || isCoord) && !conv.isSignedByCompany && (
+                        <Button onClick={() => pickAndUpload(i.id, 'signed-convention')} disabled={uploadMutation.isPending}>
+                          <FontAwesomeIcon icon={faUpload} className="mr-1" /> Déposer la convention signée (PDF)
+                        </Button>
+                      )}
+                      {isStudent && ['EnCours', 'SoutenancePlanifiee'].includes(st) && (
+                        <Button onClick={() => pickAndUpload(i.id, 'thesis')} disabled={uploadMutation.isPending}>
+                          <FontAwesomeIcon icon={faBook} className="mr-1" />
+                          {i.documents.some(d => d.kind === 'FinalThesis') ? 'Remplacer le mémoire' : 'Déposer le mémoire (PDF)'}
                         </Button>
                       )}
                       {isCoord && !['Refuse', 'Termine'].includes(st) && (
                         <Button onClick={() => { setAssignTarget(i); setAssignSupervisorId(i.academicSupervisorId || ''); }}>
                           <FontAwesomeIcon icon={faChalkboardUser} className="mr-1" />
                           {i.academicSupervisorId ? "Changer d'encadrant" : 'Affecter un encadrant'}
+                        </Button>
+                      )}
+                      {isCoord && ['Brouillon', 'Propose', 'Valide', 'EnCours'].includes(st) && (
+                        <Button design="Transparent" onClick={() => { setCancelTarget(i); setCancelReason(''); }}>
+                          <FontAwesomeIcon icon={faBan} className="mr-1" /> Annuler le dossier
                         </Button>
                       )}
                       {isCoord && isPropose && (
@@ -675,6 +817,59 @@ export const InternshipsPage: React.FC = () => {
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
                   style={{ ...inputSelectStyle, marginTop: '4px' }} />
               </div>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Dialog: annulation administrative */}
+      {cancelTarget && (
+        <Dialog open headerText="Annuler le dossier"
+          footer={
+            <div className="flex justify-end gap-2 p-2">
+              <Button onClick={() => setCancelTarget(null)}>Retour</Button>
+              <Button design="Negative" disabled={!cancelReason.trim() || cancelMutation.isPending}
+                onClick={() => cancelMutation.mutate({ id: cancelTarget.id, reason: cancelReason.trim() })}>
+                Confirmer l'annulation
+              </Button>
+            </div>
+          }
+        >
+          <div className="p-4 flex flex-col gap-3" style={{ minWidth: '420px' }}>
+            <Text><strong>{cancelTarget.title}</strong>{cancelTarget.studentName ? ` — ${cancelTarget.studentName}` : ''}</Text>
+            <Text style={{ fontSize: '13px', color: '#555' }}>
+              L'annulation est définitive (abandon, doublon, données incohérentes). L'élève est prévenu par e-mail avec le motif.
+            </Text>
+            <TextArea value={cancelReason} onInput={(e: any) => setCancelReason(e.target.value)} rows={3}
+              placeholder="Ex: doublon du dossier Capgemini déjà en cours" style={{ width: '100%' }} />
+          </div>
+        </Dialog>
+      )}
+
+      {/* Dialog: signature entreprise reçue sur papier */}
+      {companySignTarget && (
+        <Dialog open headerText="Signature de l'entreprise reçue sur papier"
+          footer={
+            <div className="flex justify-end gap-2 p-2">
+              <Button onClick={() => setCompanySignTarget(null)}>Annuler</Button>
+              <Button design="Emphasized" disabled={!companySignerName.trim() || recordCompanySignatureMutation.isPending}
+                onClick={() => recordCompanySignatureMutation.mutate({ id: companySignTarget.id, signerName: companySignerName.trim() })}>
+                Enregistrer la signature
+              </Button>
+            </div>
+          }
+        >
+          <div className="p-4 flex flex-col gap-3" style={{ minWidth: '420px' }}>
+            <Text>
+              Le scan de la convention signée par l'entreprise doit avoir été déposé : il sert de preuve.
+              {!companySignTarget.documents.some(d => d.kind === 'SignedConvention') && (
+                <strong className="block mt-1 text-amber-700">Aucun scan déposé pour l'instant pour ce dossier.</strong>
+              )}
+            </Text>
+            <div>
+              <Text style={{ fontWeight: 600, fontSize: '13px' }}>Nom et fonction du signataire :</Text>
+              <Input value={companySignerName} onInput={(e: any) => setCompanySignerName(e.target.value)}
+                placeholder="Ex: Mme Idrissi, Directrice RH" style={{ width: '100%', marginTop: '4px' }} />
             </div>
           </div>
         </Dialog>
