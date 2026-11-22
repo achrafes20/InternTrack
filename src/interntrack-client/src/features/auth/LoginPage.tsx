@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { LogoIcon } from '../../layouts/Logo';
 import {
   faShieldHalved, faClipboardList, faChalkboardUser,
   faUserGraduate, faArrowRightToBracket, faSpinner, faTriangleExclamation
@@ -92,7 +93,7 @@ export const LoginPage: React.FC = () => {
         {/* En-tête */}
         <div className="bg-gradient-to-r from-ensa-navy to-ensa-blue px-8 py-8 text-center text-white">
           <div className="w-16 h-16 bg-white rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
-            <span className="text-2xl font-black text-blue-600 tracking-tighter">SF</span>
+            <LogoIcon className="w-12 h-12" />
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight">InternTrack</h1>
           <p className="text-sm opacity-80 mt-1">ENSA &middot; Portail de Gestion des Stages & PFE</p>

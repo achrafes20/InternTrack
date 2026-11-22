@@ -1,0 +1,30 @@
+import React from 'react';
+
+/** Icône InternTrack : toque, repère et parcours validé (même dessin que public/favicon.svg). */
+export const LogoIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 64 64" className={className} role="img" aria-label="InternTrack">
+    <path d="M2 17.5 32 6l30 11.5L32 29z" fill="#0B5CC7" stroke="#0B5CC7" strokeWidth={2} strokeLinejoin="round" />
+    <path d="M10 20.5V32" stroke="#0B5CC7" strokeWidth={2.4} strokeLinecap="round" />
+    <rect x={7.6} y={30.5} width={4.8} height={8} rx={1.6} fill="#0B5CC7" />
+    <path
+      d="M30 54c-6-7.6-11-12.6-11-19.5a11 11 0 0 1 22 0C41 41.4 36 46.4 30 54z"
+      fill="#0B5CC7" stroke="#fff" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke"
+    />
+    <circle cx={30} cy={34.5} r={4.6} fill="#fff" />
+    <path d="M14.5 58.5h6c3 0 4.5-.6 7-2.2l6-3.6M38.5 51.3l7-3.1" fill="none" stroke="#0B5CC7" strokeWidth={2.6} strokeLinecap="round" />
+    <circle cx={12} cy={58.5} r={3} fill="#fff" stroke="#0B5CC7" strokeWidth={2.6} />
+    <circle cx={36} cy={52} r={3} fill="#fff" stroke="#0B5CC7" strokeWidth={2.6} />
+    <circle cx={52} cy={45} r={8} fill="#22A84A" />
+    <path d="m48.4 45.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Logo horizontal : icône + « Intern » (gris foncé) « Track » (bleu), pour fond clair. */
+export const LogoWordmark: React.FC<{ className?: string }> = ({ className }) => (
+  <span className={`inline-flex items-center gap-2 ${className ?? ''}`}>
+    <LogoIcon className="h-8 w-8" />
+    <span className="text-xl font-extrabold tracking-tight">
+      <span className="text-[#1D2D3E]">Intern</span><span className="text-[#0B5CC7]">Track</span>
+    </span>
+  </span>
+);

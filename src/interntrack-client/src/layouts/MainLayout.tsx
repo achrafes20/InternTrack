@@ -3,6 +3,7 @@ import { ChangePasswordDialog } from '../features/auth/ChangePasswordDialog';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { LogoIcon } from './Logo';
 import {
   faTableColumns, faBriefcase, faFolderOpen, faFileLines,
   faGraduationCap, faClipboardList, faUsers, faRightFromBracket, faKey, faTriangleExclamation
@@ -69,7 +70,7 @@ export const MainLayout: React.FC = () => {
       <header className="bg-gradient-to-r from-ensa-navy via-ensa-blue to-sky-500 text-white px-6 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow">
-            <span className="text-sm font-black text-blue-600 tracking-tight">SF</span>
+            <LogoIcon className="w-7 h-7" />
           </div>
           <div>
             <div className="font-bold text-base leading-tight">InternTrack</div>
