@@ -1,4 +1,4 @@
-# StageFlow - Planification Scrum (4 Sprints de 2 semaines)
+# InternTrack - Planification Scrum (4 Sprints de 2 semaines)
 
 Ce backlog Scrum est structuré pour être directement importé ou géré dans **GitHub Projects**.
 Chaque sprint livre un incrément vertical testé (Backend + Frontend + DevOps).
@@ -114,7 +114,7 @@ Chaque sprint livre un incrément vertical testé (Backend + Frontend + DevOps).
 - **Critères d'acceptation** :
   - Détection des rapports hebdomadaires non soumis dans les délais.
   - Rappel automatique aux jurys et étudiants 48 heures avant une soutenance.
-  - Abstraction `IEmailSender` avec `FakeEmailSender` en Dev et `SmtpEmailSender` (MailKit) en Prod.
+  - Abstraction `IEmailSender` avec outbox transactionnelle (table `EmailOutbox`) envoyée en arrière-plan par `SmtpEmailTransport` (MailKit) ou `LoggingEmailTransport` en Dev.
 
 ### US 4.3 : Tableau de Bord Analytique (Dashboard & KPIs)
 - **Description** : Endpoint agrégeant les statistiques décisionnelles et affichage sur l'IHM UI5.

@@ -38,8 +38,8 @@ Elle remplace les échanges dispersés par e-mails et les fichiers Excel par une
 
 ```bash
 # 1. Cloner le dépôt
-git clone https://github.com/achraf/StageFlow.git
-cd StageFlow
+git clone https://github.com/achraf/InternTrack.git
+cd InternTrack
 
 # 2. Copier le fichier d'environnement
 cp .env.example .env
@@ -76,15 +76,15 @@ Le backend applique les principes de la **Clean Architecture** (Architecture Oni
 
 ```
 ├── src/
-│   ├── StageFlow.Domain/          # Cœur métier : Entités, Enums, Règles du Workflow (zéro dépendance)
-│   ├── StageFlow.Application/     # Cas d'utilisation, DTOs, Validation, Pattern Result
-│   ├── StageFlow.Infrastructure/  # EF Core 10, PostgreSQL, QuestPDF, JWT, MailKit, Gemini IA
-│   ├── StageFlow.Api/             # ASP.NET Core 10 Web API, Middlewares, Rate Limiter, Swagger UI
-│   └── stageflow-client/          # React 19 + TypeScript + Vite + Tailwind CSS + Font Awesome
+│   ├── InternTrack.Domain/          # Cœur métier : Entités, Enums, Règles du Workflow (zéro dépendance)
+│   ├── InternTrack.Application/     # Cas d'utilisation, DTOs, Validation, Pattern Result
+│   ├── InternTrack.Infrastructure/  # EF Core 10, PostgreSQL, QuestPDF, JWT, MailKit, Gemini IA
+│   ├── InternTrack.Api/             # ASP.NET Core 10 Web API, Middlewares, Rate Limiter, Swagger UI
+│   └── interntrack-client/          # React 19 + TypeScript + Vite + Tailwind CSS + Font Awesome
 ├── tests/
-│   ├── StageFlow.Domain.UnitTests/       # Tests unitaires du domaine et de la machine à états
-│   ├── StageFlow.Application.UnitTests/  # Tests unitaires des services applicatifs
-│   └── StageFlow.Api.IntegrationTests/   # Tests d'intégration API (WebApplicationFactory)
+│   ├── InternTrack.Domain.UnitTests/       # Tests unitaires du domaine et de la machine à états
+│   ├── InternTrack.Application.UnitTests/  # Tests unitaires des services applicatifs
+│   └── InternTrack.Api.IntegrationTests/   # Tests d'intégration API (WebApplicationFactory)
 └── docs/                                 # Diagrammes ER, Registre des décisions architecturales (ADR)
 ```
 
@@ -92,10 +92,10 @@ Le backend applique les principes de la **Clean Architecture** (Architecture Oni
 
 ```mermaid
 graph TD
-    Client[React 19 + Tailwind CSS + Font Awesome] -->|HTTP REST + Bearer JWT + Cookie HttpOnly| API[StageFlow.Api - .NET 10]
-    API --> App[StageFlow.Application - Services & Pattern Result]
-    App --> Domain[StageFlow.Domain - Entités Métier & State Machine]
-    App --> Infra[StageFlow.Infrastructure]
+    Client[React 19 + Tailwind CSS + Font Awesome] -->|HTTP REST + Bearer JWT + Cookie HttpOnly| API[InternTrack.Api - .NET 10]
+    API --> App[InternTrack.Application - Services & Pattern Result]
+    App --> Domain[InternTrack.Domain - Entités Métier & State Machine]
+    App --> Infra[InternTrack.Infrastructure]
     Infra --> DB[(PostgreSQL 16 - Append-Only Trigger)]
     Infra --> PDF[Moteur Vectoriel QuestPDF & QR Code]
     Infra --> AI[Google Gemini AI Service]
@@ -110,10 +110,10 @@ Tests automatisés avec **xUnit**, **FluentAssertions**, **Moq** et **Testcontai
 
 ```bash
 # Suite complète (Docker requis pour les tests PostgreSQL)
-dotnet test StageFlow.sln
+dotnet test InternTrack.sln
 
 # Sans Docker : tout sauf les tests sur PostgreSQL réel
-dotnet test StageFlow.sln --filter "Category!=PostgreSQL"
+dotnet test InternTrack.sln --filter "Category!=PostgreSQL"
 ```
 
 - **Domain Tests** : machine à états (soumission, validation, refus, réouverture), invariants des dates, signatures de convention, notation des soutenances.
@@ -132,7 +132,7 @@ dotnet test StageFlow.sln --filter "Category!=PostgreSQL"
 
 ```bash
 # Vérification du typage et build du Frontend
-cd src/stageflow-client
+cd src/interntrack-client
 npm run build
 ```
 
@@ -143,13 +143,13 @@ npm run build
 ### Backend (.NET 10 API)
 ```bash
 # Depuis la racine du projet
-dotnet run --project src/StageFlow.Api
+dotnet run --project src/InternTrack.Api
 # L'API démarre sur http://localhost:5009 (ou https://localhost:7014)
 ```
 
 ### Frontend (React 19 + Vite)
 ```bash
-cd src/stageflow-client
+cd src/interntrack-client
 npm install
 npm run dev
 # L'interface démarre sur http://localhost:5173

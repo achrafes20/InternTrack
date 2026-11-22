@@ -1,4 +1,4 @@
-# Modèle de Données E-R StageFlow
+# Modèle de Données E-R InternTrack
 
 Diagramme relationnel Mermaid représentant la totalité des entités du domaine, leurs cardinalités, clés étrangères et propriétés directes.
 

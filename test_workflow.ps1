@@ -1,5 +1,5 @@
 Write-Host "========================================="
-Write-Host " STAGEFLOW COMPLETE END-TO-END TEST SUITE"
+Write-Host " INTERNTRACK COMPLETE END-TO-END TEST SUITE"
 Write-Host "========================================="
 
 $base = "http://localhost:5000/api/v1"

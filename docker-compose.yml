@@ -1,30 +1,32 @@
+name: interntrack
+
 services:
-  stageflow-db:
+  interntrack-db:
     image: postgres:16-alpine
-    container_name: stageflow-db
+    container_name: interntrack-db
     restart: always
     environment:
-      POSTGRES_DB: stageflow_db
-      POSTGRES_USER: stageflow_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stageflow_password}
+      POSTGRES_DB: interntrack_db
+      POSTGRES_USER: interntrack_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-interntrack_password}
     ports:
       # Exposé uniquement sur la machine hôte, jamais sur le réseau.
       # Port hôte 5433 par défaut : 5432 est souvent déjà pris par un PostgreSQL local (Odoo, installation native…).
-      # L'API n'utilise pas ce port : elle joint la base via le réseau Docker interne (stageflow-db:5432).
+      # L'API n'utilise pas ce port : elle joint la base via le réseau Docker interne (interntrack-db:5432).
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stageflow_user -d stageflow_db"]
+      test: ["CMD-SHELL", "pg_isready -U interntrack_user -d interntrack_db"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  stageflow-api:
+  interntrack-api:
     build:
       context: .
-      dockerfile: src/StageFlow.Api/Dockerfile
-    container_name: stageflow-api
+      dockerfile: src/InternTrack.Api/Dockerfile
+    container_name: interntrack-api
     restart: on-failure
     environment:
       # Démonstration locale : migrations et jeu de données activés.
@@ -32,10 +34,10 @@ services:
       # via un gestionnaire de secrets (jamais de secret en clair dans le dépôt).
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__DefaultConnection=Host=stageflow-db;Port=5432;Database=stageflow_db;Username=stageflow_user;Password=${POSTGRES_PASSWORD:-stageflow_password}
-      - JwtSettings__Secret=${JWT_SECRET:-StageFlow-Dev-Only-Secret-Key-Change-Me-In-Production-2026-ENSA-PFE!}
-      - JwtSettings__Issuer=StageFlowEnsa
-      - JwtSettings__Audience=StageFlowClient
+      - ConnectionStrings__DefaultConnection=Host=interntrack-db;Port=5432;Database=interntrack_db;Username=interntrack_user;Password=${POSTGRES_PASSWORD:-interntrack_password}
+      - JwtSettings__Secret=${JWT_SECRET:-InternTrack-Dev-Only-Secret-Key-Change-Me-In-Production-2026-ENSA-PFE!}
+      - JwtSettings__Issuer=InternTrackEnsa
+      - JwtSettings__Audience=InternTrackClient
       - JwtSettings__AccessTokenExpirationMinutes=15
       - JwtSettings__RefreshTokenExpirationDays=7
       - Database__AutoMigrate=true
@@ -43,6 +45,8 @@ services:
       - AppConfig__FrontendBaseUrl=http://localhost:3000
       - Cors__AllowedOrigins__0=http://localhost:3000
       - Smtp__Enabled=false
+      # Quota de connexions par IP et par minute (relevé uniquement pour les tests E2E en CI).
+      - RateLimiting__LoginPerMinute=${LOGIN_RATE_LIMIT:-5}
       # nginx (conteneur client) est le proxy de confiance : seules les requêtes venant des
       # réseaux privés Docker peuvent transmettre l'IP réelle via X-Forwarded-For.
       - ReverseProxy__KnownNetworks__0=172.16.0.0/12
@@ -52,12 +56,22 @@ services:
       - Storage__RootPath=/app/data/uploads
       - DataProtection__KeysPath=/app/data/keys
       - AppConfig__TimeZone=Africa/Casablanca
+      # Stockage des fichiers : Local (volume ci-dessous) ou AzureBlob (production multi-instances).
+      # Test local d'Azure Blob : STORAGE_PROVIDER=AzureBlob + docker compose --profile azure up -d
+      - Storage__Provider=${STORAGE_PROVIDER:-Local}
+      # Clé publique et documentée de l'émulateur Azurite (pas un secret).
+      - Storage__AzureBlob__ConnectionString=${AZURE_BLOB_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://interntrack-azurite:10000/devstoreaccount1;}
+      - Storage__AzureBlob__ContainerName=interntrack-documents
+      # Antivirus ClamAV des fichiers déposés : ANTIVIRUS_ENABLED=true + docker compose --profile antivirus up -d
+      - Antivirus__Enabled=${ANTIVIRUS_ENABLED:-false}
+      - Antivirus__Host=interntrack-clamav
+      - Antivirus__Port=3310
     volumes:
-      - stageflow_data:/app/data
+      - interntrack_data:/app/data
     ports:
       - "5000:8080"
     depends_on:
-      stageflow-db:
+      interntrack-db:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
@@ -66,18 +80,46 @@ services:
       retries: 10
       start_period: 30s
 
-  stageflow-client:
+  interntrack-client:
     build:
-      context: ./src/stageflow-client
+      context: ./src/interntrack-client
       dockerfile: Dockerfile
-    container_name: stageflow-client
+    container_name: interntrack-client
     restart: always
     ports:
       - "3000:80"
     depends_on:
-      stageflow-api:
+      interntrack-api:
         condition: service_healthy
+
+  # --- Services optionnels (profils) ---------------------------------------------------------
+  interntrack-clamav:
+    image: clamav/clamav:1.4
+    container_name: interntrack-clamav
+    profiles: ["antivirus"]
+    restart: always
+    volumes:
+      - clamav_db:/var/lib/clamav
+    healthcheck:
+      # La première mise à jour des signatures prend quelques minutes.
+      test: ["CMD-SHELL", "clamdcheck.sh || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  interntrack-azurite:
+    # Émulateur officiel Azure Storage, pour tester Storage__Provider=AzureBlob en local.
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    container_name: interntrack-azurite
+    profiles: ["azure"]
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --location /data
+    restart: always
+    volumes:
+      - azurite_data:/data
 
 volumes:
   postgres_data:
-  stageflow_data:
+  interntrack_data:
+  clamav_db:
+  azurite_data:

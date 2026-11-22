@@ -32,7 +32,7 @@ bld/
 appsettings.Development.json
 # Configuration de développement partagée : contient uniquement un secret JWT de dev,
 # jamais utilisé en production (surchargé par JwtSettings__Secret / JWT_SECRET).
-!src/StageFlow.Api/appsettings.Development.json
+!src/InternTrack.Api/appsettings.Development.json
 *.local.json
 secrets.json
 .env
@@ -65,3 +65,8 @@ ehthumbs.db
 
 ## Fichiers déposés en développement local
 App_Data/
+
+# Tests front et E2E
+src/interntrack-client/coverage/
+src/interntrack-client/playwright-report/
+src/interntrack-client/test-results/

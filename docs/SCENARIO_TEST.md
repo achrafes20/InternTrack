@@ -1,4 +1,4 @@
-# Scénario de recette StageFlow — « Une journée à l'ENSA »
+# Scénario de recette InternTrack — « Une journée à l'ENSA »
 
 Ce scénario couvre le parcours complet de l'application : authentification, workflow des stages,
 rapports hebdomadaires, convention PDF et vérification publique, soutenances avec détection de
@@ -18,7 +18,7 @@ conflits, administration, audit immuable et contrôles de sécurité.
 
 > **Important — limiteur de connexion :** le endpoint de login est limité à **5 requêtes par minute
 > et par IP**, y compris les connexions réussies. Si un `429 Too Many Requests` apparaît, attendre
-> une minute ou exécuter `docker compose restart stageflow-api`.
+> une minute ou exécuter `docker compose restart interntrack-api`.
 
 ---
 
@@ -32,7 +32,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Attendre que `stageflow-api` et `stageflow-db` soient `healthy`.
+Attendre que `interntrack-api` et `interntrack-db` soient `healthy`.
 
 Vérifications de démarrage :
 
@@ -88,7 +88,7 @@ Invoke-WebRequest http://localhost:3000 -UseBasicParsing | Select-Object StatusC
 1. Dans `Mes Stages & PFE`, repérer le stage **Capgemini — Architecture Microservices…**
    au statut `En cours`.
 2. Cliquer sur **« Télécharger la convention PDF »**.
-3. Ouvrir le PDF : en-tête ENSA / StageFlow, informations du stage, signatures et QR code.
+3. Ouvrir le PDF : en-tête ENSA / InternTrack, informations du stage, signatures et QR code.
 
 **Résultat attendu :** un fichier `convention_<id>.pdf` est téléchargé et s'ouvre correctement.
 
@@ -97,7 +97,7 @@ Invoke-WebRequest http://localhost:3000 -UseBasicParsing | Select-Object StatusC
 Récupérer un jeton de vérification depuis la base :
 
 ```powershell
-docker exec stageflow-db psql -U stageflow_user -d stageflow_db -t -A -c 'SELECT "VerificationToken" FROM "Conventions" LIMIT 1;'
+docker exec interntrack-db psql -U interntrack_user -d interntrack_db -t -A -c 'SELECT "VerificationToken" FROM "Conventions" LIMIT 1;'
 ```
 
 1. Ouvrir dans une fenêtre de navigation privée :
@@ -245,7 +245,7 @@ son stage passe à `Soutenance planifiée`.
 Tenter une modification directe en base :
 
 ```powershell
-docker exec stageflow-db psql -U stageflow_user -d stageflow_db -c 'UPDATE "AuditLogs" SET "Action" = ''HACK'' WHERE "Id" = (SELECT "Id" FROM "AuditLogs" LIMIT 1);'
+docker exec interntrack-db psql -U interntrack_user -d interntrack_db -c 'UPDATE "AuditLogs" SET "Action" = ''HACK'' WHERE "Id" = (SELECT "Id" FROM "AuditLogs" LIMIT 1);'
 ```
 
 **Résultat attendu :** erreur PostgreSQL du type
@@ -261,7 +261,7 @@ La ligne n'est pas modifiée.
 Récupérer l'identifiant du stage d'Achraf et le token de Fatima :
 
 ```powershell
-$achrafInternshipId = (docker exec stageflow-db psql -U stageflow_user -d stageflow_db -t -A -c 'SELECT "Id" FROM "Internships" WHERE "Title" LIKE ''Architecture Microservices%'' LIMIT 1;').Trim()
+$achrafInternshipId = (docker exec interntrack-db psql -U interntrack_user -d interntrack_db -t -A -c 'SELECT "Id" FROM "Internships" WHERE "Title" LIKE ''Architecture Microservices%'' LIMIT 1;').Trim()
 
 $login = Invoke-RestMethod -Method Post -Uri http://localhost:5000/api/v1/auth/login `
   -ContentType 'application/json' `
@@ -293,7 +293,7 @@ try {
 
 1. Ouvrir les outils de développement du navigateur (F12) → onglet `Network`.
 2. Se connecter : la réponse `/auth/login` contient `accessToken` et un cookie
-   `stageflow_refresh_token` (`HttpOnly`, `SameSite=Lax`).
+   `interntrack_refresh_token` (`HttpOnly`, `SameSite=Lax`).
 3. Recharger la page : un appel `/auth/refresh` doit renvoyer un nouveau cookie
    (valeur différente) et un nouvel access token.
 4. Tenter de réutiliser l'ancien cookie : l'API doit le refuser et révoquer la famille de tokens.
@@ -309,7 +309,7 @@ try {
 `429 Too Many Requests`. Redémarrer l'API réinitialise le compteur :
 
 ```powershell
-docker compose restart stageflow-api
+docker compose restart interntrack-api
 ```
 
 ---

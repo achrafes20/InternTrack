@@ -1,6 +1,6 @@
-# Registre des Décisions Architecturales (ADR) - StageFlow
+# Registre des Décisions Architecturales (ADR) - InternTrack
 
-Ce document consigne les décisions techniques et de modélisation prises de manière autonome pour garantir la cohérence et l'excellence de niveau production du projet StageFlow.
+Ce document consigne les décisions techniques et de modélisation prises de manière autonome pour garantir la cohérence et l'excellence de niveau production du projet InternTrack.
 
 ---
 
@@ -46,7 +46,7 @@ Ce document consigne les décisions techniques et de modélisation prises de man
 
 ### ADR 009 : Notation par le jury
 - Chaque membre interne du jury dépose une évaluation (note et appréciation), révisable jusqu'à l'arrêt de la note finale. L'élève ne voit jamais les évaluations individuelles.
-- La note finale est arrêtée par le président du jury, ou par le responsable de filière ou l'administrateur. La moyenne des évaluations est proposée par défaut.
+- La note finale est arrêtée par le président du jury, ou par le responsable de filière ou l'administrateur. Elle n'est **pas saisie librement** : elle est calculée à partir des évaluations (voir ADR 013).
 - Une note arrêtée n'est plus modifiée par une nouvelle saisie : la **correction** est un acte distinct, réservé au responsable ou à l'administrateur, avec un motif obligatoire. L'ancienne et la nouvelle valeur sont conservées par le journal d'audit.
 
 ### ADR 010 : Signature de l'entreprise et documents déposés
@@ -57,10 +57,21 @@ Ce document consigne les décisions techniques et de modélisation prises de man
 - **Identifiants** : les `Id` sont générés par le domaine. Ils sont donc déclarés `ValueGeneratedNever`, faute de quoi EF prendrait une entité ajoutée via une navigation pour une ligne existante.
 
 ### ADR 011 : Données héritées et pilotage
-- Les règles de gestion ne réécrivent jamais les données existantes de façon automatique. Un **rapport d'anomalies** (`GET /api/v1/anomalies`) les détecte et indique la correction à apporter ; c'est un humain qui décide, notamment via l'**annulation administrative** (statut `Annule`, motif obligatoire, interdite une fois la soutenance planifiée).
+- Les règles de gestion ne réécrivent jamais les données existantes de façon automatique. Un **rapport d'anomalies** (`GET /api/v1/anomalies`) les détecte et indique la correction à apporter ; c'est un humain qui décide, notamment via l'**annulation administrative** (statut `Annule`, motif obligatoire, possible jusqu'au rattrapage ; voir ADR 013).
 - L'**année universitaire** est persistée (`Internships.AcademicYear`), calculée à partir de la date de début : l'année commence le 1er septembre. Elle sert aux filtres, au bilan annuel et à l'export. La **promotion** est l'année de sortie de l'élève (`AspNetUsers.GraduationYear`).
 - L'export CSV utilise le séparateur `;` et un BOM UTF-8 (pour Excel en français). Les cellules commençant par `= + - @` sont neutralisées (injection CSV).
 
 ### ADR 012 : Intégrité de la convention et signature qualifiée
 - **Aujourd'hui** : chaque partie signe par une attestation tracée (compte authentifié, lien à usage unique ou scan déposé). À la dernière signature, le PDF est figé et son empreinte SHA-256 est publiée. Cela garantit l'intégrité du document (toute modification est détectable), mais **pas** la valeur d'une signature électronique qualifiée au sens de la loi 43-20 (Maroc) ou du règlement eIDAS.
 - **Pour une signature qualifiée**, il faut un prestataire de services de confiance (Barid eSign, Yousign, DocuSign…), un contrat, des clés d'API et une décision juridique de l'établissement. Le point d'intégration est l'exemplaire figé : envoi du PDF figé au prestataire, réception par webhook du PDF signé, puis remplacement de l'exemplaire et de son empreinte. Cette intégration n'est pas implémentée : elle ne peut pas être testée sans compte chez un prestataire.
+
+### ADR 013 : Résultat de la soutenance, rattrapage, report et avenants
+Le règlement est configurable dans la section `Defenses` d'`appsettings.json`. Les valeurs par défaut sont indiquées entre parenthèses.
+- **Note finale calculée** : c'est la moyenne des membres internes du jury. Chacun d'eux doit avoir évalué. Si le tuteur entreprise a évalué, sa note compte pour `TutorWeight` (25 %). `RequireTutorEvaluation` (désactivé) rend son évaluation obligatoire. La correction motivée reste possible, et le résultat suit la note corrigée.
+- **Résultat** : si la note atteint `PassingGrade` (10/20), le dossier passe à `Termine`. En dessous, il passe à `Ajourne`, et une session de rattrapage peut être planifiée (`MaxAttempts` = 2 sessions). Après le dernier échec, il passe à `NonValide`, qui est un état final. Lors d'un rattrapage, la note précédente est conservée (`PreviousAttemptGrade`) et les évaluations précédentes sont écartées. Un dossier ajourné peut déposer un mémoire révisé.
+- **Prérequis** : le mémoire doit avoir été déposé pour que le jury évalue et que la note soit arrêtée. Le suivi doit aussi être suffisant : le nombre de rapports hebdomadaires validés doit être au moins `MinValidatedReportRatio` (0,5) × le nombre de semaines écoulées, arrondi à l'entier inférieur. Ce suivi est vérifié à la planification et à l'arrêt de la note.
+- **Date de soutenance** : elle doit être dans le futur. Elle peut avoir lieu au plus tôt `EarliestDaysBeforeEnd` (30 j) avant la fin du stage, et au plus tard `LatestDaysAfterEnd` (90 j) après. Pour un rattrapage, la limite est de `RetakeLatestDaysAfterEnd` (180 j), et il doit avoir lieu après la session précédente.
+- **Report** : une soutenance non notée peut être annulée avec un motif (absence, maladie, mémoire non prêt). Elle est conservée, marquée `CancelledAt`. Le dossier revient `EnCours`, ou `Ajourne` s'il s'agissait d'un rattrapage. La contrainte d'exclusion PostgreSQL `EX_Defenses_Classroom_Slot` ne porte plus que sur les soutenances actives (`WHERE "CancelledAt" IS NULL`), ce qui libère la salle. Replanifier réactive la soutenance.
+- **Annulation du dossier** : elle est possible jusqu'au rattrapage. Elle annule la soutenance non notée et résilie la convention dans la même transaction. Une convention résiliée (`TerminatedAt`) ne peut plus être signée et ne peut plus recevoir d'avenant. La page publique de vérification indique la résiliation.
+- **Avenants** (`ConventionAmendments`) : après la signature de la convention, toute modification des dates, du tuteur entreprise ou du sujet passe par un avenant. Cela vaut pour les statuts validé ou en cours. La date de début ne peut changer qu'avant le démarrage. Un seul avenant peut être en attente par convention, ce qui est garanti par un index unique filtré. L'école signe à la création, l'élève signe depuis son compte, et l'école enregistre la signature de l'entreprise avec le nom du signataire. Les modifications s'appliquent au dossier à la troisième signature, après une nouvelle vérification des durées réglementaires. La page de vérification indique le nombre d'avenants appliqués : les dates affichées peuvent différer de l'exemplaire initial figé.
+- **Dates JSON** : une date reçue sans fuseau (`2026-09-01`) est interprétée en UTC (`UtcDateTimeJsonConverter`). Avant ce correctif, elle provoquait une erreur 500 à l'écriture dans PostgreSQL.

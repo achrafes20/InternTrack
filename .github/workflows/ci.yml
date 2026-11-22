@@ -21,16 +21,16 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore StageFlow.sln
+        run: dotnet restore InternTrack.sln
 
       - name: Build Solution
-        run: dotnet build StageFlow.sln --no-restore --configuration Release
+        run: dotnet build InternTrack.sln --no-restore --configuration Release
 
       - name: Run Unit & Integration Tests
-        run: dotnet test StageFlow.sln --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        run: dotnet test InternTrack.sln --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
 
   frontend-build-lint:
-    name: Build & Lint Frontend (React / Vite)
+    name: Lint, Test & Build Frontend (React / Vite)
     runs-on: ubuntu-latest
 
     steps:
@@ -42,12 +42,64 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-          cache-dependency-path: src/stageflow-client/package-lock.json
+          cache-dependency-path: src/interntrack-client/package-lock.json
 
       - name: Install dependencies
-        working-directory: src/stageflow-client
+        working-directory: src/interntrack-client
         run: npm ci
 
+      - name: Lint (oxlint)
+        working-directory: src/interntrack-client
+        run: npm run lint
+
+      - name: Unit & component tests (Vitest)
+        working-directory: src/interntrack-client
+        run: npm run test:coverage
+
       - name: TypeScript type-check and Vite Build
-        working-directory: src/stageflow-client
+        working-directory: src/interntrack-client
         run: npm run build
+
+  e2e:
+    name: End-to-end tests (Playwright on Docker stack)
+    runs-on: ubuntu-latest
+    needs: [backend-build-test, frontend-build-lint]
+    env:
+      LOGIN_RATE_LIMIT: '100'
+      SEED_DEMO_DATA: 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start the full stack (PostgreSQL + API + nginx)
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: src/interntrack-client/package-lock.json
+
+      - name: Install dependencies and Chromium
+        working-directory: src/interntrack-client
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        working-directory: src/interntrack-client
+        run: npm run e2e
+
+      - name: API logs on failure
+        if: failure()
+        run: docker compose logs interntrack-api --tail 300
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: src/interntrack-client/playwright-report
+          retention-days: 7

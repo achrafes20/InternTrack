@@ -1,0 +1,41 @@
+### Requêtes de test de l'API InternTrack (extension REST Client / Visual Studio).
+### 1. Exécutez « Connexion » puis copiez l'accessToken dans @token.
+
+@host = http://localhost:5009
+@token = coller-ici-le-access-token
+
+### Santé de l'API
+GET {{host}}/health
+
+### Connexion (responsable de filière GI, compte de démonstration)
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "responsable.gi@ensa.ma",
+  "password": "Resp@123456"
+}
+
+### Dossiers de stage visibles
+GET {{host}}/api/v1/internships
+Authorization: Bearer {{token}}
+
+### Enseignants disponibles pour un jury
+GET {{host}}/api/v1/teachers
+Authorization: Bearer {{token}}
+
+### Vérification de conflits de soutenance
+POST {{host}}/api/v1/defenses/check-conflict
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "scheduledAt": "2026-12-15T10:00:00Z",
+  "durationMinutes": 45,
+  "classroom": "Salle des Thèses B204",
+  "juryTeacherIds": []
+}
+
+### Journal d'audit (administrateur uniquement)
+GET {{host}}/api/v1/audit?pageNumber=1&pageSize=20
+Authorization: Bearer {{token}}
